@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+uv.lock
 
 # Model checkpoints (large binaries, reproduced via training)
 models/checkpoints/*.pt
@@ -22,12 +23,15 @@ data/processed/
 .env
 .venv/
 venv/
+.prime/
+environments/retrosynthesis/.prime/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 .DS_Store
+.claude/
 
 # Streamlit
 .streamlit/
@@ -41,3 +45,5 @@ tasks.md
 PLAN.md                                                                                                                         
 project_description.md                                                                                                          
 Claude.md 
+
+
