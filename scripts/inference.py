@@ -18,15 +18,15 @@ import io
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from models.policy import RetroPolicy
+from data.stock.loader import StockList
 from env.MCTS import MCTS
 from env.Rewards import RewardCalculator
-from data.stock.loader import StockList
+from models.policy import RetroPolicy
 
 
 def load_model(checkpoint_path: Optional[str] = None, device: Optional[str] = None) -> RetroPolicy:
@@ -43,12 +43,16 @@ def load_model(checkpoint_path: Optional[str] = None, device: Optional[str] = No
 
     if checkpoint_path is not None and Path(checkpoint_path).is_file():
         meta = policy.load_checkpoint(checkpoint_path)
-        print(f"Loaded checkpoint from {checkpoint_path} "
-              f"(step={meta['step']}, reward={meta['reward']:.4f})")
+        print(
+            f"Loaded checkpoint from {checkpoint_path} "
+            f"(step={meta['step']}, reward={meta['reward']:.4f})"
+        )
     else:
         if checkpoint_path is not None:
-            print(f"Checkpoint not found at {checkpoint_path}, "
-                  "using pre-trained ReactionT5v2 weights.")
+            print(
+                f"Checkpoint not found at {checkpoint_path}, "
+                "using pre-trained ReactionT5v2 weights."
+            )
         else:
             print("No checkpoint specified, using pre-trained ReactionT5v2 weights.")
 
@@ -82,7 +86,7 @@ def mol_to_base64_image(smiles: str, size: tuple = (300, 300)) -> Optional[str]:
         return None
 
 
-def flatten_route_molecules(route_dict: Dict) -> List[str]:
+def flatten_route_molecules(route_dict: dict) -> list[str]:
     """Recursively traverse a route tree dict and collect all unique SMILES.
 
     Args:
@@ -94,7 +98,7 @@ def flatten_route_molecules(route_dict: Dict) -> List[str]:
     seen = set()
     result = []
 
-    def _traverse(node: Dict) -> None:
+    def _traverse(node: dict) -> None:
         smi = node.get("smiles")
         if smi and smi not in seen:
             seen.add(smi)
@@ -113,7 +117,7 @@ def run_inference(
     stock_list,
     max_simulations: int = 500,
     time_budget: float = 60.0,
-) -> Dict:
+) -> dict:
     """Run MCTS retrosynthetic search and return structured results.
 
     Args:
@@ -180,12 +184,14 @@ def run_inference(
         unique_smiles = flatten_route_molecules(result.best_route)
         for smi in unique_smiles:
             sa = RewardCalculator.compute_sascore(smi)
-            molecules.append({
-                "smiles": smi,
-                "sascore": sa if sa is not None else 0.0,
-                "in_stock": stock_list.is_buyable(smi),
-                "image_b64": mol_to_base64_image(smi),
-            })
+            molecules.append(
+                {
+                    "smiles": smi,
+                    "sascore": sa if sa is not None else 0.0,
+                    "in_stock": stock_list.is_buyable(smi),
+                    "image_b64": mol_to_base64_image(smi),
+                }
+            )
 
     # Build stats dict (only the three documented keys)
     stats = {
@@ -209,7 +215,7 @@ def run_inference(
     return output
 
 
-def print_route_tree(route: Dict, indent: int = 0) -> None:
+def print_route_tree(route: dict, indent: int = 0) -> None:
     """Print a route tree in a human-readable indented format.
 
     Args:

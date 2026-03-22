@@ -1,7 +1,5 @@
 """Unit tests for RewardCalculator."""
 
-import pytest
-
 # SMILES constants
 ETHANOL = "CCO"
 ACETIC_ACID = "CC(=O)O"
@@ -95,9 +93,7 @@ def test_stock_reward_not_buyable(reward_calc, stock_list):
 
 
 def test_atom_conservation_perfect(reward_calc):
-    reward = reward_calc.atom_conservation_reward(
-        ASPIRIN, [SALICYLIC_ACID, ACETIC_ANHYDRIDE]
-    )
+    reward = reward_calc.atom_conservation_reward(ASPIRIN, [SALICYLIC_ACID, ACETIC_ANHYDRIDE])
     assert reward == 1.0
 
 
@@ -119,9 +115,7 @@ def test_combined_reward_in_range(reward_calc, stock_list):
 
 
 def test_combined_reward_all_valid_buyable(reward_calc, stock_list):
-    reward = reward_calc.combined_reward(
-        ASPIRIN, [SALICYLIC_ACID, ACETIC_ANHYDRIDE], stock_list
-    )
+    reward = reward_calc.combined_reward(ASPIRIN, [SALICYLIC_ACID, ACETIC_ANHYDRIDE], stock_list)
     assert reward > 0.0
 
 

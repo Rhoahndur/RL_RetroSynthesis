@@ -30,8 +30,11 @@ select = [
 ]
 ignore = [
     "E501",   # line too long (handled by formatter)
+    "E402",   # module level import not at top — needed for sys.path manipulation
     "B008",   # do not perform function calls in argument defaults
     "SIM108", # use ternary operator (sometimes less readable)
+    "UP007",  # Use X | Y for type annotations — keep Optional for compatibility
+    "B905",   # zip() strict= — not supported in Python 3.9 (system Python)
 ]
 
 [tool.ruff.lint.isort]

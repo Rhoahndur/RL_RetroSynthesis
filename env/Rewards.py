@@ -6,14 +6,13 @@ into a single scalar reward in [0, 1].
 
 import math
 from collections import Counter
-from typing import Dict, List, Optional
+from typing import Optional
 
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors
 
-
 # Default reward component weights
-DEFAULT_WEIGHTS: Dict[str, float] = {
+DEFAULT_WEIGHTS: dict[str, float] = {
     "validity": 0.3,
     "plausibility": 0.2,
     "sascore": 0.2,
@@ -32,7 +31,7 @@ class RewardCalculator:
         reward = calc.combined_reward(product_smi, reactant_smi_list, stock)
     """
 
-    def __init__(self, weights: Optional[Dict[str, float]] = None) -> None:
+    def __init__(self, weights: Optional[dict[str, float]] = None) -> None:
         """Initialize with optional custom reward weights.
 
         Args:
@@ -79,7 +78,7 @@ class RewardCalculator:
         except Exception:
             return 0.0
 
-    def sascore_reward(self, product_smiles: str, reactant_smiles_list: List[str]) -> float:
+    def sascore_reward(self, product_smiles: str, reactant_smiles_list: list[str]) -> float:
         """Score based on synthetic accessibility improvement.
 
         Reactants should be simpler (lower SAscore) than the product.
@@ -144,7 +143,9 @@ class RewardCalculator:
         except Exception:
             return 0.0
 
-    def atom_conservation_reward(self, product_smiles: str, reactant_smiles_list: List[str]) -> float:
+    def atom_conservation_reward(
+        self, product_smiles: str, reactant_smiles_list: list[str]
+    ) -> float:
         """Check that atoms are approximately conserved in the reaction.
 
         Reactants should contain at least the atoms present in the product
@@ -204,9 +205,9 @@ class RewardCalculator:
     def combined_reward(
         self,
         product_smiles: str,
-        reactant_smiles_list: List[str],
+        reactant_smiles_list: list[str],
         stock_list,
-        weights: Optional[Dict[str, float]] = None,
+        weights: Optional[dict[str, float]] = None,
     ) -> float:
         """Compute the weighted combination of all reward components.
 

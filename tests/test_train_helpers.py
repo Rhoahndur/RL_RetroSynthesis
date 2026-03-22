@@ -1,11 +1,9 @@
 """Tests for helper functions in scripts/train_rl.py."""
 
-import os
 import sys
 import types
 from pathlib import Path
 
-import pytest
 import torch
 
 # ---------------------------------------------------------------------------
@@ -15,23 +13,25 @@ import torch
 if "transformers" not in sys.modules:
     _mock = types.ModuleType("transformers")
     _mock.AutoModelForSeq2SeqLM = type(
-        "AutoModelForSeq2SeqLM", (),
+        "AutoModelForSeq2SeqLM",
+        (),
         {"from_pretrained": classmethod(lambda cls, *a, **kw: None)},
     )
     _mock.AutoTokenizer = type(
-        "AutoTokenizer", (),
+        "AutoTokenizer",
+        (),
         {"from_pretrained": classmethod(lambda cls, *a, **kw: None)},
     )
     sys.modules["transformers"] = _mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.train_rl import load_training_data, sample_batch, save_checkpoint, FALLBACK_MOLECULES
-
+from scripts.train_rl import FALLBACK_MOLECULES, load_training_data, sample_batch, save_checkpoint
 
 # ---------------------------------------------------------------------------
 # load_training_data
 # ---------------------------------------------------------------------------
+
 
 def test_load_training_data_missing_file():
     result = load_training_data("/nonexistent/path.csv")
@@ -52,6 +52,7 @@ def test_load_training_data_valid_csv(tmp_path):
 # sample_batch
 # ---------------------------------------------------------------------------
 
+
 def test_sample_batch_correct_size():
     data = ["A", "B", "C"]
     result = sample_batch(data, 5)
@@ -68,6 +69,7 @@ def test_sample_batch_from_data():
 # ---------------------------------------------------------------------------
 # save_checkpoint
 # ---------------------------------------------------------------------------
+
 
 def test_save_checkpoint_creates_file(tmp_path, mock_policy):
     optimizer = torch.optim.SGD([torch.nn.Parameter(torch.zeros(1))], lr=0.01)
@@ -90,7 +92,7 @@ def test_save_checkpoint_prunes_old(tmp_path, mock_policy):
     # Create 5 checkpoints; step 2 has the highest reward (0.9000)
     configs = [
         (1, 0.1),
-        (2, 0.9),   # best reward — should survive pruning
+        (2, 0.9),  # best reward — should survive pruning
         (3, 0.3),
         (4, 0.4),
         (5, 0.5),
@@ -101,7 +103,7 @@ def test_save_checkpoint_prunes_old(tmp_path, mock_policy):
             optimizer=optimizer,
             step=step,
             reward=reward,
-            best_reward=max(r for _, r in configs[:configs.index((step, reward)) + 1]),
+            best_reward=max(r for _, r in configs[: configs.index((step, reward)) + 1]),
             checkpoint_dir=str(tmp_path),
         )
 
@@ -112,17 +114,17 @@ def test_save_checkpoint_prunes_old(tmp_path, mock_policy):
     assert len(remaining) == 4, f"Expected 4 checkpoints, got {len(remaining)}: {remaining_names}"
 
     # The best-reward checkpoint (step 2) must survive
-    assert any("step2" in f.name for f in remaining), (
-        f"Best-reward checkpoint (step2) was pruned. Remaining: {remaining_names}"
-    )
+    assert any(
+        "step2" in f.name for f in remaining
+    ), f"Best-reward checkpoint (step2) was pruned. Remaining: {remaining_names}"
 
     # The last 3 by step (3, 4, 5) must survive
     for step_num in (3, 4, 5):
-        assert any(f"step{step_num}" in f.name for f in remaining), (
-            f"Checkpoint step{step_num} was pruned. Remaining: {remaining_names}"
-        )
+        assert any(
+            f"step{step_num}" in f.name for f in remaining
+        ), f"Checkpoint step{step_num} was pruned. Remaining: {remaining_names}"
 
     # Step 1 (lowest step, not best reward) should be pruned
-    assert not any("step1" in f.name for f in remaining), (
-        f"Checkpoint step1 should have been pruned. Remaining: {remaining_names}"
-    )
+    assert not any(
+        "step1" in f.name for f in remaining
+    ), f"Checkpoint step1 should have been pruned. Remaining: {remaining_names}"

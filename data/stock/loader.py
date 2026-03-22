@@ -5,10 +5,9 @@ All SMILES are stored and compared in canonical form via RDKit.
 """
 
 import os
-from typing import Optional, Set
+from typing import Optional
 
 from rdkit import Chem
-
 
 DEFAULT_STOCK_PATH = os.path.join(os.path.dirname(__file__), "buyables.csv")
 
@@ -23,7 +22,7 @@ class StockList:
     """
 
     def __init__(self) -> None:
-        self._canonical_smiles: Set[str] = set()
+        self._canonical_smiles: set[str] = set()
         self._loaded = False
 
     def load(self, csv_path: Optional[str] = None) -> "StockList":
@@ -43,8 +42,8 @@ class StockList:
 
         self._canonical_smiles.clear()
 
-        with open(csv_path, "r") as f:
-            header = f.readline()  # skip header row
+        with open(csv_path) as f:
+            f.readline()  # skip header row
             for line in f:
                 line = line.strip()
                 if not line:

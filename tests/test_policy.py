@@ -2,8 +2,7 @@
 
 import pytest
 
-from models.policy import RetroPolicy, DEFAULT_MODEL_NAME
-
+from models.policy import DEFAULT_MODEL_NAME, RetroPolicy
 
 # ---------------------------------------------------------------------------
 # Fast tests (no model download)

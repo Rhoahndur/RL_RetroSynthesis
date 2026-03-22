@@ -7,7 +7,7 @@ Finds complete synthesis routes from target molecule to buyable starting materia
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Optional
 
 
 @dataclass
@@ -24,10 +24,11 @@ class MCTSNode:
         is_terminal: Whether this molecule is in the stock list (buyable).
         is_expanded: Whether this node has been expanded by the policy.
     """
+
     smiles: str
     depth: int = 0
     parent: Optional["MCTSNode"] = None
-    children: List[List["MCTSNode"]] = field(default_factory=list)
+    children: list[list["MCTSNode"]] = field(default_factory=list)
     visit_count: int = 0
     total_value: float = 0.0
     is_terminal: bool = False
@@ -52,7 +53,7 @@ class MCTSNode:
             UCT score. Returns infinity for unvisited nodes.
         """
         if self.visit_count == 0:
-            return float('inf')
+            return float("inf")
         if self.parent is None:
             return self.value
         exploitation = self.total_value / self.visit_count
@@ -72,15 +73,18 @@ class MCTSResult:
         all_routes: List of all complete routes found, sorted by score.
         stats: Search statistics.
     """
-    best_route: Optional[Dict] = None
+
+    best_route: Optional[dict] = None
     score: float = 0.0
-    all_routes: List[Dict] = field(default_factory=list)
-    stats: Dict = field(default_factory=lambda: {
-        "simulations": 0,
-        "time_seconds": 0.0,
-        "routes_found": 0,
-        "max_depth_reached": 0,
-    })
+    all_routes: list[dict] = field(default_factory=list)
+    stats: dict = field(
+        default_factory=lambda: {
+            "simulations": 0,
+            "time_seconds": 0.0,
+            "routes_found": 0,
+            "max_depth_reached": 0,
+        }
+    )
 
 
 class MCTS:
@@ -180,7 +184,6 @@ class MCTS:
             )
 
         simulations = 0
-        early_stop = False
 
         for _ in range(self.max_simulations):
             # Check time budget
@@ -215,11 +218,12 @@ class MCTS:
             # Early termination check: look for a high-confidence complete route
             if simulations % 50 == 0:
                 routes = self.extract_routes(root, top_n=1)
-                if routes and routes[0].get("score", 0) > 0.95:
-                    # Check if this route is truly complete (all leaves in stock)
-                    if self._is_route_complete(routes[0]):
-                        early_stop = True
-                        break
+                if (
+                    routes
+                    and routes[0].get("score", 0) > 0.95
+                    and self._is_route_complete(routes[0])
+                ):
+                    break
 
         # Extract final routes
         all_routes = self.extract_routes(root, top_n=3)
@@ -255,7 +259,7 @@ class MCTS:
         while current.is_expanded and current.children and not current.is_terminal:
             # Pick the child group with the best average UCT score
             best_group = None
-            best_group_score = float('-inf')
+            best_group_score = float("-inf")
 
             for group in current.children:
                 if not group:
@@ -281,10 +285,7 @@ class MCTS:
             # sibling in the same group, or move to a non-terminal child in the group
             # that still needs expansion
             if best_child.is_terminal:
-                non_terminal = [
-                    c for c in best_group
-                    if not c.is_terminal and not c.is_expanded
-                ]
+                non_terminal = [c for c in best_group if not c.is_terminal and not c.is_expanded]
                 if non_terminal:
                     best_child = max(
                         non_terminal,
@@ -294,8 +295,7 @@ class MCTS:
                     # All children in best group are terminal or expanded;
                     # descend into expanded non-terminal children
                     expandable = [
-                        c for c in best_group
-                        if not c.is_terminal and c.is_expanded and c.children
+                        c for c in best_group if not c.is_terminal and c.is_expanded and c.children
                     ]
                     if expandable:
                         best_child = max(
@@ -310,7 +310,7 @@ class MCTS:
 
         return current
 
-    def _expand(self, node: MCTSNode) -> List[MCTSNode]:
+    def _expand(self, node: MCTSNode) -> list[MCTSNode]:
         """Expansion phase: use policy to generate children for a node.
 
         Calls policy.predict_greedy() to get top-K reactant sets,
@@ -323,12 +323,10 @@ class MCTS:
             List of newly created child nodes.
         """
         node.is_expanded = True
-        all_new_children: List[MCTSNode] = []
+        all_new_children: list[MCTSNode] = []
 
         try:
-            predictions = self.policy.predict_greedy(
-                node.smiles, num_beams=self.top_k
-            )
+            predictions = self.policy.predict_greedy(node.smiles, num_beams=self.top_k)
         except Exception:
             return all_new_children
 
@@ -340,12 +338,12 @@ class MCTS:
                 continue
 
             # Each prediction may contain '.' separating multiple reactants
-            reactant_smiles_list = [s.strip() for s in prediction.split('.') if s.strip()]
+            reactant_smiles_list = [s.strip() for s in prediction.split(".") if s.strip()]
             if not reactant_smiles_list:
                 continue
 
             # Create a group of child nodes (one per reactant in this disconnection)
-            group: List[MCTSNode] = []
+            group: list[MCTSNode] = []
             for reactant_smi in reactant_smiles_list:
                 child = MCTSNode(
                     smiles=reactant_smi,
@@ -408,9 +406,7 @@ class MCTS:
                 if depth >= self.max_depth:
                     # Can't go deeper; score this molecule as-is
                     try:
-                        reward = self.reward_calculator.combined_reward(
-                            smi, [smi], self.stock_list
-                        )
+                        reward = self.reward_calculator.combined_reward(smi, [smi], self.stock_list)
                         total_reward += reward
                     except Exception:
                         pass
@@ -429,7 +425,7 @@ class MCTS:
                 if not best_prediction or not isinstance(best_prediction, str):
                     continue
 
-                reactants = [s.strip() for s in best_prediction.split('.') if s.strip()]
+                reactants = [s.strip() for s in best_prediction.split(".") if s.strip()]
                 if not reactants:
                     continue
 
@@ -481,7 +477,7 @@ class MCTS:
             current.total_value += value
             current = current.parent
 
-    def extract_routes(self, root: MCTSNode, top_n: int = 3) -> List[Dict]:
+    def extract_routes(self, root: MCTSNode, top_n: int = 3) -> list[dict]:
         """Extract the top-N synthesis routes from the search tree.
 
         A route is "complete" when all leaf molecules are in the stock list.
@@ -501,8 +497,8 @@ class MCTS:
         Returns:
             List of route dicts, sorted by score descending.
         """
-        complete_routes: List[Dict] = []
-        partial_routes: List[Dict] = []
+        complete_routes: list[dict] = []
+        partial_routes: list[dict] = []
 
         if not root.children:
             # No expansions happened; return the root as a trivial route
@@ -538,7 +534,7 @@ class MCTS:
 
         return result
 
-    def _build_route_tree(self, node: MCTSNode, group: List[MCTSNode]) -> Optional[Dict]:
+    def _build_route_tree(self, node: MCTSNode, group: list[MCTSNode]) -> Optional[dict]:
         """Recursively build a route dict from a node and one of its child groups.
 
         Args:
@@ -556,7 +552,7 @@ class MCTS:
         group_count = 0
 
         for child in group:
-            child_dict: Dict
+            child_dict: dict
             if child.is_terminal:
                 child_dict = {
                     "smiles": child.smiles,
@@ -567,23 +563,27 @@ class MCTS:
             elif child.children:
                 # Pick the best child group for this node (highest average value)
                 best_sub = None
-                best_sub_score = float('-inf')
+                best_sub_score = float("-inf")
                 for sub_group in child.children:
-                    sub_score = sum(
-                        c.value for c in sub_group
-                    ) / len(sub_group) if sub_group else 0.0
+                    sub_score = (
+                        sum(c.value for c in sub_group) / len(sub_group) if sub_group else 0.0
+                    )
                     if sub_score > best_sub_score:
                         best_sub_score = sub_score
                         best_sub = sub_group
 
                 if best_sub is not None:
                     child_dict_result = self._build_route_tree(child, best_sub)
-                    child_dict = child_dict_result if child_dict_result else {
-                        "smiles": child.smiles,
-                        "score": child.value,
-                        "in_stock": False,
-                        "children": [],
-                    }
+                    child_dict = (
+                        child_dict_result
+                        if child_dict_result
+                        else {
+                            "smiles": child.smiles,
+                            "score": child.value,
+                            "in_stock": False,
+                            "children": [],
+                        }
+                    )
                 else:
                     child_dict = {
                         "smiles": child.smiles,
@@ -619,7 +619,7 @@ class MCTS:
         }
 
     @staticmethod
-    def _is_route_complete(route: Dict) -> bool:
+    def _is_route_complete(route: dict) -> bool:
         """Check if all leaves of a route tree are in stock.
 
         Args:
@@ -631,6 +631,4 @@ class MCTS:
         if not route.get("children"):
             # Leaf node
             return route.get("in_stock", False)
-        return all(
-            MCTS._is_route_complete(child) for child in route["children"]
-        )
+        return all(MCTS._is_route_complete(child) for child in route["children"])

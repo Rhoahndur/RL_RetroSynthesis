@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import base64
 import re
-from io import BytesIO
 
 import streamlit as st
 from rdkit import Chem
@@ -23,7 +22,7 @@ from rdkit.Chem import AllChem, Draw, rdMolDescriptors
 
 from data.stock.loader import StockList
 from env.Rewards import RewardCalculator
-from scripts.inference import load_model, mol_to_base64_image, run_inference
+from scripts.inference import load_model, run_inference
 
 # Preset demo molecules
 PRESETS = {
@@ -180,7 +179,9 @@ def display_target_molecule(smiles: str, reward_calc: RewardCalculator, stock_li
     return True
 
 
-def display_route_tree(route: dict, reward_calc: RewardCalculator, stock_list: StockList, depth: int = 0):
+def display_route_tree(
+    route: dict, reward_calc: RewardCalculator, stock_list: StockList, depth: int = 0
+):
     """Recursively display a retrosynthesis route tree.
 
     Each node shows its molecule image, SMILES, SAscore, and stock status.
@@ -215,7 +216,9 @@ def display_route_tree(route: dict, reward_calc: RewardCalculator, stock_list: S
                     display_route_tree(child, reward_calc, stock_list, depth=depth + 1)
 
 
-def _display_molecule_card(smiles: str, in_stock: bool, reward_calc: RewardCalculator, stock_list: StockList):
+def _display_molecule_card(
+    smiles: str, in_stock: bool, reward_calc: RewardCalculator, stock_list: StockList
+):
     """Display a single molecule card with image, SMILES, SAscore, stock badge."""
     img = render_molecule_image(smiles, size=(250, 250))
     if img is not None:
@@ -377,9 +380,7 @@ def main():
 
     # ---- 5. Search Button + Results ----
     st.markdown("---")
-    search_clicked = st.button(
-        "🔍 Find Synthesis Route", type="primary", use_container_width=True
-    )
+    search_clicked = st.button("🔍 Find Synthesis Route", type="primary", use_container_width=True)
 
     if search_clicked:
         with st.spinner("Searching for synthesis routes..."):

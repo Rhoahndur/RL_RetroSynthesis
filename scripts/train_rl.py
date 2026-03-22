@@ -16,14 +16,12 @@ Usage:
 
 import argparse
 import glob
-import json
 import os
 import random
 import re
 import sys
 import time
 from pathlib import Path
-from typing import List
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -31,10 +29,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pandas as pd
 import torch
 
-from models.policy import RetroPolicy
-from env.Rewards import RewardCalculator
 from data.stock.loader import StockList
-
+from env.Rewards import RewardCalculator
+from models.policy import RetroPolicy
 
 FALLBACK_MOLECULES = [
     "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
@@ -54,13 +51,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--baseline_decay", type=float, default=0.99)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--device", type=str, default="auto")
-    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
+    parser.add_argument(
+        "--resume", type=str, default=None, help="Path to checkpoint to resume from"
+    )
     parser.add_argument("--data_path", type=str, default="data/processed/training_targets.csv")
     parser.add_argument("--stock_path", type=str, default="data/stock/buyables.csv")
     return parser.parse_args()
 
 
-def load_training_data(data_path: str) -> List[str]:
+def load_training_data(data_path: str) -> list[str]:
     """Load target molecule SMILES from CSV.
 
     Args:
@@ -70,8 +69,10 @@ def load_training_data(data_path: str) -> List[str]:
         List of SMILES strings.
     """
     if not os.path.exists(data_path):
-        print(f"WARNING: Training data file not found at '{data_path}'. "
-              f"Using fallback demo molecules ({len(FALLBACK_MOLECULES)} molecules).")
+        print(
+            f"WARNING: Training data file not found at '{data_path}'. "
+            f"Using fallback demo molecules ({len(FALLBACK_MOLECULES)} molecules)."
+        )
         return list(FALLBACK_MOLECULES)
 
     df = pd.read_csv(data_path)
@@ -103,7 +104,7 @@ def load_training_data(data_path: str) -> List[str]:
     return smiles_list
 
 
-def sample_batch(data: List[str], batch_size: int) -> List[str]:
+def sample_batch(data: list[str], batch_size: int) -> list[str]:
     """Sample a random batch of target molecules.
 
     Args:
@@ -166,7 +167,7 @@ def save_checkpoint(policy, optimizer, step, reward, best_reward, checkpoint_dir
     keep_last_3.add(best_ckpt[2])
 
     # Delete everything not in the keep set
-    for s_val, r_val, fp in parsed:
+    for _, _, fp in parsed:
         if fp not in keep_last_3:
             try:
                 os.remove(fp)
@@ -214,7 +215,7 @@ def train(args: argparse.Namespace) -> None:
 
     # Initialize tracking variables
     baseline = 0.0
-    best_reward = -float('inf')
+    best_reward = -float("inf")
     start_step = 0
 
     # Resume from checkpoint if requested
@@ -223,7 +224,7 @@ def train(args: argparse.Namespace) -> None:
             print(f"Resuming from checkpoint: {args.resume}")
             meta = policy.load_checkpoint(args.resume)
             start_step = meta.get("step", 0) + 1
-            best_reward = meta.get("reward", -float('inf'))
+            best_reward = meta.get("reward", -float("inf"))
             if meta.get("has_optimizer"):
                 # Reload optimizer state from checkpoint
                 ckpt_data = torch.load(args.resume, map_location=device)
@@ -234,7 +235,7 @@ def train(args: argparse.Namespace) -> None:
             print(f"WARNING: Checkpoint '{args.resume}' not found. Starting from scratch.")
 
     # Print header
-    print(f"  Model:          ReactionT5v2-retrosynthesis")
+    print("  Model:          ReactionT5v2-retrosynthesis")
     print(f"  Device:         {device}")
     print(f"  Dataset size:   {len(training_data)} molecules")
     print(f"  Batch size:     {args.batch_size}")
@@ -287,9 +288,7 @@ def train(args: argparse.Namespace) -> None:
             rewards_list.append(reward)
 
             # Track validity: check if all reactants are valid SMILES
-            all_valid = all(
-                reward_calc.validity_reward(r) > 0.5 for r in reactant_list
-            )
+            all_valid = all(reward_calc.validity_reward(r) > 0.5 for r in reactant_list)
             if all_valid:
                 validity_count += 1
 

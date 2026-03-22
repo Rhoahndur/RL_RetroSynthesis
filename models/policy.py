@@ -5,13 +5,11 @@ suitable for REINFORCE training: forward pass, temperature sampling,
 log-probability computation, and checkpoint management.
 """
 
-import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-
 
 DEFAULT_MODEL_NAME = "sagawa/ReactionT5v2-retrosynthesis"
 
@@ -63,7 +61,7 @@ class RetroPolicy:
         product_smiles: str,
         num_candidates: int = 5,
         temperature: float = 1.0,
-    ) -> List[str]:
+    ) -> list[str]:
         """Generate reactant SMILES candidates via temperature-scaled sampling.
 
         Used during RL training for exploration.
@@ -101,7 +99,7 @@ class RetroPolicy:
         self,
         product_smiles: str,
         num_beams: int = 5,
-    ) -> List[str]:
+    ) -> list[str]:
         """Generate reactant SMILES via beam search (deterministic).
 
         Used during MCTS simulation for exploitation.
@@ -231,7 +229,7 @@ class RetroPolicy:
 
         torch.save(checkpoint, path)
 
-    def load_checkpoint(self, path: str) -> Dict:
+    def load_checkpoint(self, path: str) -> dict:
         """Load model weights from a checkpoint file.
 
         Args:

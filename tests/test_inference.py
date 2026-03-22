@@ -5,8 +5,6 @@ import sys
 import types
 from pathlib import Path
 
-import pytest
-
 # ---------------------------------------------------------------------------
 # Stub out 'transformers' before importing scripts.inference so that
 # models.policy can be imported without the HuggingFace library installed.
@@ -14,23 +12,25 @@ import pytest
 if "transformers" not in sys.modules:
     _mock = types.ModuleType("transformers")
     _mock.AutoModelForSeq2SeqLM = type(
-        "AutoModelForSeq2SeqLM", (),
+        "AutoModelForSeq2SeqLM",
+        (),
         {"from_pretrained": classmethod(lambda cls, *a, **kw: None)},
     )
     _mock.AutoTokenizer = type(
-        "AutoTokenizer", (),
+        "AutoTokenizer",
+        (),
         {"from_pretrained": classmethod(lambda cls, *a, **kw: None)},
     )
     sys.modules["transformers"] = _mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.inference import mol_to_base64_image, flatten_route_molecules, run_inference
-
+from scripts.inference import flatten_route_molecules, mol_to_base64_image, run_inference
 
 # ---------------------------------------------------------------------------
 # mol_to_base64_image
 # ---------------------------------------------------------------------------
+
 
 def test_mol_to_base64_image_valid():
     result = mol_to_base64_image("CCO")
@@ -64,6 +64,7 @@ def test_mol_to_base64_image_empty():
 # ---------------------------------------------------------------------------
 # flatten_route_molecules
 # ---------------------------------------------------------------------------
+
 
 def test_flatten_route_molecules_simple():
     tree = {"smiles": "CCO", "children": []}
@@ -107,6 +108,7 @@ def test_flatten_route_molecules_deduplication():
 # ---------------------------------------------------------------------------
 # run_inference
 # ---------------------------------------------------------------------------
+
 
 def test_run_inference_invalid_smiles(mock_policy, reward_calc, stock_list):
     result = run_inference(

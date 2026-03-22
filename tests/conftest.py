@@ -6,7 +6,6 @@ downloading the actual model, plus pre-loaded StockList and RewardCalculator.
 
 import sys
 from pathlib import Path
-from typing import List
 
 import pytest
 import torch
@@ -17,10 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from data.stock.loader import StockList
 from env.Rewards import RewardCalculator
 
-
 # ---------------------------------------------------------------------------
 # Mock policy — no model download, deterministic outputs
 # ---------------------------------------------------------------------------
+
 
 class MockPolicy:
     """Lightweight stand-in for RetroPolicy used in unit tests.
@@ -42,13 +41,14 @@ class MockPolicy:
     }
     _DEFAULT_RESPONSE = "CCO.CC(=O)O"
 
-    def predict(self, product_smiles: str, num_candidates: int = 5,
-                temperature: float = 1.0) -> List[str]:
+    def predict(
+        self, product_smiles: str, num_candidates: int = 5, temperature: float = 1.0
+    ) -> list[str]:
         resp = self._RESPONSES.get(product_smiles, self._DEFAULT_RESPONSE)
         self._call_count += 1
         return [resp] * num_candidates
 
-    def predict_greedy(self, product_smiles: str, num_beams: int = 5) -> List[str]:
+    def predict_greedy(self, product_smiles: str, num_beams: int = 5) -> list[str]:
         resp = self._RESPONSES.get(product_smiles, self._DEFAULT_RESPONSE)
         self._call_count += 1
         return [resp] * num_beams
@@ -66,13 +66,17 @@ class MockPolicy:
 
     def load_checkpoint(self, path):
         data = torch.load(path, map_location="cpu")
-        return {"step": data.get("step", 0), "reward": data.get("reward", 0.0),
-                "has_optimizer": False}
+        return {
+            "step": data.get("step", 0),
+            "reward": data.get("reward", 0.0),
+            "has_optimizer": False,
+        }
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_policy():

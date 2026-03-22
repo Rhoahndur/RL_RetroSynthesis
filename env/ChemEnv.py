@@ -4,7 +4,7 @@ Wraps the policy, reward calculator, and stock list into a step-based
 interface for multi-step retrosynthetic planning.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 class ChemEnv:
@@ -54,14 +54,14 @@ class ChemEnv:
         self.max_depth = max_depth
 
         # Internal state -- initialized properly in reset()
-        self._molecules: List[str] = []
-        self._depths: List[int] = []
-        self._in_stock: List[bool] = []
-        self._route_tree: Dict[str, Any] = {}
+        self._molecules: list[str] = []
+        self._depths: list[int] = []
+        self._in_stock: list[bool] = []
+        self._route_tree: dict[str, Any] = {}
         self._done: bool = True
         self._current_step: int = 0
 
-    def reset(self, target_smiles: str) -> Dict[str, Any]:
+    def reset(self, target_smiles: str) -> dict[str, Any]:
         """Reset the environment with a new target molecule.
 
         Args:
@@ -94,7 +94,7 @@ class ChemEnv:
 
         return self._get_state()
 
-    def step(self, molecule_idx: int = 0) -> Tuple[Dict[str, Any], float, bool, Dict]:
+    def step(self, molecule_idx: int = 0) -> tuple[dict[str, Any], float, bool, dict]:
         """Take one retrosynthetic step on a molecule in the current set.
 
         Selects the molecule at molecule_idx from the unresolved molecules,
@@ -122,9 +122,7 @@ class ChemEnv:
             )
 
         # Gather indices of unresolved molecules
-        unresolved_indices = [
-            i for i, in_stock in enumerate(self._in_stock) if not in_stock
-        ]
+        unresolved_indices = [i for i, in_stock in enumerate(self._in_stock) if not in_stock]
 
         # Handle molecule_idx out of range
         if not unresolved_indices or molecule_idx < 0 or molecule_idx >= len(unresolved_indices):
@@ -189,9 +187,7 @@ class ChemEnv:
             )
 
         # Compute reward
-        reward = self.reward_calculator.combined_reward(
-            molecule, reactants, self.stock_list
-        )
+        reward = self.reward_calculator.combined_reward(molecule, reactants, self.stock_list)
 
         # Build reward breakdown for info dict
         reward_breakdown = self._compute_reward_breakdown(molecule, reactants)
@@ -217,9 +213,7 @@ class ChemEnv:
         # Check done conditions
         all_resolved = all(self._in_stock)
         max_depth_hit = any(
-            d >= self.max_depth
-            for d, s in zip(self._depths, self._in_stock)
-            if not s
+            d >= self.max_depth for d, s in zip(self._depths, self._in_stock) if not s
         )
 
         if all_resolved or max_depth_hit:
@@ -233,7 +227,7 @@ class ChemEnv:
 
         return (self._get_state(), reward, self._done, info)
 
-    def get_route(self) -> Dict:
+    def get_route(self) -> dict:
         """Return the synthesis route tree built so far.
 
         Returns:
@@ -251,7 +245,7 @@ class ChemEnv:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _get_state(self) -> Dict[str, Any]:
+    def _get_state(self) -> dict[str, Any]:
         """Build the current state dictionary."""
         return {
             "molecules": list(self._molecules),
@@ -263,10 +257,10 @@ class ChemEnv:
 
     def _update_route_tree(
         self,
-        node: Dict[str, Any],
+        node: dict[str, Any],
         target_smiles: str,
         target_depth: int,
-        reactants: List[str],
+        reactants: list[str],
     ) -> bool:
         """Recursively find the node matching *target_smiles* at *target_depth*
         that has no children yet, and attach reactant children to it.
@@ -298,9 +292,7 @@ class ChemEnv:
 
         return False
 
-    def _compute_reward_breakdown(
-        self, product: str, reactants: List[str]
-    ) -> Dict[str, float]:
+    def _compute_reward_breakdown(self, product: str, reactants: list[str]) -> dict[str, float]:
         """Compute individual reward components for the info dict."""
         rc = self.reward_calculator
 
