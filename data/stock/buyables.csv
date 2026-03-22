@@ -1,0 +1,247 @@
+smiles,name,category
+O,water,solvent
+CO,methanol,solvent
+CCO,ethanol,solvent
+CCCO,1-propanol,solvent
+CCCCO,1-butanol,solvent
+CC(C)O,isopropanol,solvent
+CC(C)CO,isobutanol,solvent
+CC(O)C,isopropanol,solvent
+CCCCCO,1-pentanol,solvent
+CC(C)(C)O,tert-butanol,solvent
+OCC(O)CO,glycerol,solvent
+OCCO,ethylene glycol,solvent
+COCCOC,1-2-dimethoxyethane,solvent
+CCOC(C)=O,ethyl acetate,solvent
+COC(C)=O,methyl acetate,solvent
+CC(=O)C,acetone,solvent
+CC(=O)CC,methyl ethyl ketone,solvent
+CCCCC(C)=O,2-heptanone,solvent
+ClCCl,dichloromethane,solvent
+ClC(Cl)Cl,chloroform,solvent
+ClC(Cl)(Cl)Cl,carbon tetrachloride,solvent
+ClCCCl,1-2-dichloroethane,solvent
+CCCCCC,hexane,solvent
+CCCCCCC,heptane,solvent
+C1CCCC1,cyclopentane,solvent
+C1CCCCC1,cyclohexane,solvent
+C1CCOC1,tetrahydrofuran,solvent
+C1COCCO1,1-4-dioxane,solvent
+CS(C)=O,dimethyl sulfoxide,solvent
+CN(C)C=O,dimethylformamide,solvent
+CN1CCCC1=O,N-methyl-2-pyrrolidone,solvent
+CC#N,acetonitrile,solvent
+C1CCNCC1,piperidine,solvent
+c1ccncc1,pyridine,solvent
+CC(=O)O,acetic acid,acid
+OC(=O)C(F)(F)F,trifluoroacetic acid,acid
+OS(O)(=O)=O,sulfuric acid,acid
+Cl,hydrochloric acid,acid
+O=NO,nitrous acid,acid
+O=[N+]([O-])O,nitric acid,acid
+OP(O)(O)=O,phosphoric acid,acid
+OCCO[S](O)(=O)=O,2-hydroxyethyl sulfuric acid,acid
+OC(=O)C(O)=O,oxalic acid,acid
+OC(=O)CC(O)(CC(O)=O)C(O)=O,citric acid,acid
+OC(=O)CC(O)=O,malonic acid,acid
+OC(=O)CCC(O)=O,glutaric acid,acid
+OC(=O)CCCCC(O)=O,pimelic acid,acid
+OC(=O)CC(O)(C(O)=O)CC(O)=O,citric acid alt,acid
+OC(=O)/C=C\C(O)=O,maleic acid,acid
+OC(=O)/C=C/C(O)=O,fumaric acid,acid
+OC(=O)CCC(O)=O,succinic acid,acid
+CC(O)C(O)=O,lactic acid,acid
+OC(=O)c1ccccc1,benzoic acid,acid
+[Na]O,[Na]OH sodium hydroxide,base
+[K]O,[K]OH potassium hydroxide,base
+[Na]OCC,sodium ethoxide,base
+[Na]OC,sodium methoxide,base
+N,ammonia,base
+[Na][H],sodium hydride,base
+[Li]CCCC,n-butyllithium,base
+CC(C)(C)[Li],tert-butyllithium,base
+CC[Li],ethyllithium,base
+CCN(CC)CC,triethylamine,base
+C1CCN(CC1)C1=NCCCN1,DBU,base
+CN(C)c1ccncc1,4-dimethylaminopyridine,base
+[Na]OC(C)(C)C,sodium tert-butoxide,base
+[K]OC(C)(C)C,potassium tert-butoxide,base
+c1ccccc1,benzene,aromatic
+Cc1ccccc1,toluene,aromatic
+CCc1ccccc1,ethylbenzene,aromatic
+c1ccc2ccccc2c1,naphthalene,aromatic
+c1ccc(cc1)C,toluene alt,aromatic
+c1ccc(cc1)O,phenol,aromatic
+c1ccc(cc1)N,aniline,aromatic
+c1ccc(cc1)Cl,chlorobenzene,aromatic
+c1ccc(cc1)Br,bromobenzene,aromatic
+c1ccc(cc1)F,fluorobenzene,aromatic
+c1ccc(cc1)I,iodobenzene,aromatic
+c1ccc(cc1)[N+](=O)[O-],nitrobenzene,aromatic
+c1ccc(cc1)C=O,benzaldehyde,aromatic
+c1ccc(cc1)C(O)=O,benzoic acid alt,aromatic
+c1ccc(cc1)S,thiophenol,aromatic
+c1cc(ccc1O)O,hydroquinone,aromatic
+c1cc(ccc1N)O,4-aminophenol,aromatic
+c1cc(ccc1N)N,1-4-phenylenediamine,aromatic
+Cc1ccc(C)cc1,p-xylene,aromatic
+Cc1ccccc1C,o-xylene,aromatic
+Cc1cccc(C)c1,m-xylene,aromatic
+c1ccoc1,furan,aromatic
+c1ccsc1,thiophene,aromatic
+c1cc[nH]c1,pyrrole,aromatic
+c1cnc2[nH]cnc2c1,purine,aromatic
+c1ccnc(c1)N,2-aminopyridine,aromatic
+CC(C)Cc1ccccc1,isobutylbenzene,aromatic
+CC(=O)c1ccc(CC(C)C)cc1,4-isobutylacetophenone,aromatic
+Nc1ccc(O)cc1,p-aminophenol,aromatic
+OC(=O)c1ccccc1O,salicylic acid,aromatic
+CN,methylamine,amine
+CCN,ethylamine,amine
+CCCN,propylamine,amine
+CC(C)N,isopropylamine,amine
+C(C)(C)(C)N,tert-butylamine,amine
+CNC,dimethylamine,amine
+CCNCC,diethylamine,amine
+CN(C)C,trimethylamine,amine
+NCC(O)=O,glycine,amine
+NCCN,ethylenediamine,amine
+NCCCN,1-3-diaminopropane,amine
+NCC(N)=O,glycinamide,amine
+C1CCNC1,pyrrolidine,amine
+C1CNCCN1,piperazine,amine
+c1ccc2[nH]ccc2c1,indole,amine
+NC(N)=O,urea,amine
+CN(C)C(=O)NC,1-1-3-trimethylurea,amine
+CC(=O)OC(C)=O,acetic anhydride,reagent
+CCC(=O)Cl,propanoyl chloride,reagent
+CC(=O)Cl,acetyl chloride,reagent
+ClC(=O)c1ccccc1,benzoyl chloride,reagent
+Cl[Al](Cl)Cl,aluminum chloride,reagent
+OC(Cl)(Cl)Cl,chloral hydrate,reagent
+O=C(Cl)Cl,phosgene,reagent
+CCOC(=O)OCC,diethyl carbonate,reagent
+COC(=O)OC,dimethyl carbonate,reagent
+[Pd],palladium,reagent
+[Pd](Cl)Cl,palladium(II) chloride,reagent
+O=C1CCCN1Br,NBS N-bromosuccinimide,reagent
+O=C1CCCN1Cl,NCS N-chlorosuccinimide,reagent
+OO,hydrogen peroxide,reagent
+[O-][Mn](=O)(=O)=O.[K+],potassium permanganate,reagent
+O=[Cr](=O)(O)O,chromic acid,reagent
+[BH4-].[Na+],sodium borohydride,reagent
+[AlH4-].[Li+],lithium aluminum hydride,reagent
+CI,methyl iodide,alkyl_halide
+CCl,methyl chloride,alkyl_halide
+CBr,methyl bromide,alkyl_halide
+CCBr,ethyl bromide,alkyl_halide
+CCCl,ethyl chloride,alkyl_halide
+CCI,ethyl iodide,alkyl_halide
+CCCBr,propyl bromide,alkyl_halide
+CCCCl,propyl chloride,alkyl_halide
+CCCI,propyl iodide,alkyl_halide
+CCCCBr,butyl bromide,alkyl_halide
+CC(C)Br,isopropyl bromide,alkyl_halide
+CC(C)Cl,isopropyl chloride,alkyl_halide
+BrCCBr,1-2-dibromoethane,alkyl_halide
+ClCCCCl,1-3-dichloropropane,alkyl_halide
+C(Cl)(Cl)=C(Cl)Cl,tetrachloroethylene,alkyl_halide
+BrCc1ccccc1,benzyl bromide,alkyl_halide
+ClCc1ccccc1,benzyl chloride,alkyl_halide
+C=CCl,allyl chloride,alkyl_halide
+C=CCBr,allyl bromide,alkyl_halide
+C=O,formaldehyde,aldehyde
+CC=O,acetaldehyde,aldehyde
+CCC=O,propanal,aldehyde
+CCCC=O,butanal,aldehyde
+CC(C)C=O,isobutyraldehyde,aldehyde
+CCCCC=O,pentanal,aldehyde
+O=Cc1ccccc1,benzaldehyde alt,aldehyde
+O=Cc1ccc(O)cc1,4-hydroxybenzaldehyde,aldehyde
+O=Cc1ccc(OC)cc1,4-methoxybenzaldehyde,aldehyde
+O=Cc1ccc([N+]([O-])=O)cc1,4-nitrobenzaldehyde,aldehyde
+O=Cc1ccc(Cl)cc1,4-chlorobenzaldehyde,aldehyde
+O=CC=O,glyoxal,aldehyde
+CC(=O)C,acetone alt,ketone
+CCC(=O)CC,3-pentanone,ketone
+CC(=O)c1ccccc1,acetophenone,ketone
+O=C(c1ccccc1)c1ccccc1,benzophenone,ketone
+O=C1CCCCC1,cyclohexanone,ketone
+O=C1CCCC1,cyclopentanone,ketone
+CC(=O)CCC(=O)C,2-5-hexanedione,ketone
+CC(=O)CC(=O)OCC,ethyl acetoacetate,ketone
+CC(=O)CC(=O)C,2-4-pentanedione,ketone
+CCCCCC(=O)C,2-heptanone alt,ketone
+CCOC(=O)CC(=O)OCC,diethyl malonate,reagent
+OC(=O)CC(=O)O,malonic acid alt,reagent
+O=C(OCC)c1ccccc1,ethyl benzoate,reagent
+OC(=O)CF,fluoroacetic acid,reagent
+O=C(O)CCl,chloroacetic acid,reagent
+O=C(O)CBr,bromoacetic acid,reagent
+CCOC(=O)C,ethyl acetate alt,reagent
+COC(=O)C,methyl acetate alt,reagent
+OB(O)c1ccccc1,phenylboronic acid,reagent
+OB(O)c1ccc(C)cc1,4-methylphenylboronic acid,reagent
+OB(O)c1ccc(OC)cc1,4-methoxyphenylboronic acid,reagent
+OB(O)c1ccc(F)cc1,4-fluorophenylboronic acid,reagent
+CC=C,propylene,alkene
+C=C,ethylene,alkene
+C=CC=C,1-3-butadiene,alkene
+CC(=C)C,isobutylene,alkene
+C1=CCCCC1,cyclohexene,alkene
+C1=CCCC1,cyclopentene,alkene
+C=Cc1ccccc1,styrene,alkene
+CC(=O)OC=C,vinyl acetate,alkene
+C#C,acetylene,alkyne
+CC#C,propyne,alkyne
+C#Cc1ccccc1,phenylacetylene,alkyne
+O1c2ccccc2c3ccccc13,xanthene,aromatic
+O=c1[nH]c(=O)c2[nH]cnc2[nH]1,xanthine,aromatic
+Cn1c(=O)c2[nH]cnc2n(C)c1=O,theophylline,aromatic
+O=S(=O)(O)c1ccc(C)cc1,p-toluenesulfonic acid,acid
+OS(=O)(=O)C(F)(F)F,triflic acid,acid
+[Na]Cl,sodium chloride,common_reagent
+[Na]O[Na],sodium oxide,common_reagent
+[K]OC(=O)C,potassium acetate,common_reagent
+[Na]OC(=O)C,sodium acetate,common_reagent
+[Na]C#N,sodium cyanide,common_reagent
+[K]C#N,potassium cyanide,common_reagent
+[N-]=[N+]=[N-].[Na+],sodium azide,common_reagent
+[Na][N-][N+]#N,sodium azide alt,common_reagent
+OC(=O)C(=O)O,oxalic acid alt,common_reagent
+O=C(O)CCCCC(=O)O,adipic acid,common_reagent
+OC(=O)c1ccc(C(=O)O)cc1,terephthalic acid,common_reagent
+Oc1ccccc1,phenol alt,alcohol
+OCc1ccccc1,benzyl alcohol,alcohol
+OC(c1ccccc1)c1ccccc1,benzhydrol,alcohol
+OC1CCCCC1,cyclohexanol,alcohol
+OCCCCCCO,1-6-hexanediol,alcohol
+OC(CO)CO,glycerol alt,alcohol
+CCCCCCCO,1-heptanol,alcohol
+CCCCCCCCO,1-octanol,alcohol
+OCC=C,allyl alcohol,alcohol
+CC(O)CC,2-butanol,alcohol
+C(CO)N,ethanolamine,alcohol
+Fc1ccc(cc1)Br,4-bromofluorobenzene,aromatic
+Clc1ccc(cc1)Br,4-bromochlorobenzene,aromatic
+Clc1ccccc1Cl,1-2-dichlorobenzene,aromatic
+Oc1ccc(cc1)Cl,4-chlorophenol,aromatic
+Oc1ccc(cc1)Br,4-bromophenol,aromatic
+Oc1ccc(cc1)C,4-methylphenol,aromatic
+Oc1ccc(cc1)OC,4-methoxyphenol,aromatic
+COc1ccccc1,anisole,aromatic
+CCOc1ccccc1,phenetole,aromatic
+COc1ccc(N)cc1,p-anisidine,aromatic
+Nc1ccc(Cl)cc1,4-chloroaniline,aromatic
+Nc1ccc(Br)cc1,4-bromoaniline,aromatic
+Nc1ccc(F)cc1,4-fluoroaniline,aromatic
+Nc1ccc(C)cc1,p-toluidine,aromatic
+Nc1ccc(cc1)[N+]([O-])=O,4-nitroaniline,aromatic
+Nc1ccccc1C,2-methylaniline,aromatic
+CN(C)C(=O)N(C)C,tetramethylurea,reagent
+CN(C)C(=O)NC,1-1-3-trimethylurea alt,reagent
+O=C(NC)NC,1-3-dimethylurea,reagent
+c1ccc2c(c1)ccc1ccccc12,phenanthrene,aromatic
+c1ccc2cc3ccccc3cc2c1,anthracene,aromatic
+C(=O)(O)O,carbonic acid,acid
+OCC,ethanol alt,alcohol
