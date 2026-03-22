@@ -1,4 +1,43 @@
-tasks.md
-PLAN.md
-project_description.md
-Claude.md
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Model checkpoints (large binaries, reproduced via training)
+models/checkpoints/*.pt
+models/checkpoints/*.pth
+
+# Downloaded/generated data (reproduced via prepare_data.py)
+data/raw/
+data/processed/
+
+# Caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Streamlit
+.streamlit/
+
+# HuggingFace model cache (if downloaded locally)
+*.bin
+*.safetensors
+
+# Planning docs
+tasks.md                                                                                                                        
+PLAN.md                                                                                                                         
+project_description.md                                                                                                          
+Claude.md 
