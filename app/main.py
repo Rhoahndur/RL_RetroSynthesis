@@ -19,7 +19,7 @@ import re
 
 import streamlit as st
 from rdkit import Chem
-from rdkit.Chem import AllChem, Draw, rdMolDescriptors
+from rdkit.Chem import AllChem, rdMolDescriptors
 
 from data.stock.loader import StockList
 from env.Rewards import RewardCalculator
@@ -81,14 +81,47 @@ def stock_badge(in_stock: bool) -> str:
     return "🟡 Intermediate"
 
 
-def render_molecule_image(smiles: str, size=(300, 300)):
+def render_molecule_svg(smiles: str, max_width: int = 250):
+    """Render a molecule as crisp SVG, scaled proportionally to atom count.
+
+    Sizing: ~15px per heavy atom + base of 60px, capped at max_width.
+    A 6-membered ring (benzene, 6 atoms) ≈ 150px wide.
+    """
     try:
+        from rdkit.Chem.Draw import rdMolDraw2D
+
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             return None
-        return Draw.MolToImage(mol, size=size)
+        n_atoms = mol.GetNumHeavyAtoms()
+        base = max(120, min(max_width, int(n_atoms * 15 + 60)))
+        w, h = base, int(base * 0.75)
+
+        drawer = rdMolDraw2D.MolDraw2DSVG(w, h)
+        opts = drawer.drawOptions()
+        opts.bondLineWidth = 1.5
+        # Use white background for visibility on dark themes
+        opts.setBackgroundColour((1, 1, 1, 1))
+        drawer.DrawMolecule(mol)
+        drawer.FinishDrawing()
+        svg = drawer.GetDrawingText()
+        # Add rounded corners via wrapping div
+        return svg
     except Exception:
         return None
+
+
+def show_molecule(smiles: str, max_width: int = 250):
+    """Display a molecule SVG in Streamlit with rounded white card styling."""
+    svg = render_molecule_svg(smiles, max_width=max_width)
+    if svg:
+        st.markdown(
+            f'<div style="background:white; border-radius:8px; '
+            f'padding:8px; display:inline-block;">{svg}</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.caption(f"`{smiles}`")
 
 
 def display_target_molecule(smiles, reward_calc, stock_list):
@@ -100,9 +133,8 @@ def display_target_molecule(smiles, reward_calc, stock_list):
     st.subheader("Target Molecule")
     col_img, col_props = st.columns([1, 1])
     with col_img:
-        img = render_molecule_image(smiles, size=(400, 400))
-        if img is not None:
-            st.image(img, caption=smiles, use_container_width=True)
+        show_molecule(smiles, max_width=350)
+        st.caption(smiles)
     with col_props:
         st.markdown("**Properties**")
         formula = rdMolDescriptors.CalcMolFormula(mol)
@@ -170,33 +202,50 @@ def molecule_label(smiles, stock_list):
     return None
 
 
-def role_badge(in_stock, is_target=False):
-    """Return a styled badge showing the molecule's role."""
-    if is_target:
-        return ":red[**TARGET PRODUCT**]"
-    if in_stock:
-        return ":green[**STARTING MATERIAL (In Stock)**]"
-    return ":orange[**INTERMEDIATE**]"
+def infer_reaction_type(product_smiles, reactant_smiles_list):
+    """Infer a likely reaction type from the product and reactants."""
+    try:
+        reactant_str = " ".join(reactant_smiles_list).lower()
+        prod = product_smiles.lower()
+
+        # Check for common patterns
+        if "c(=o)oc(c)=o" in reactant_str or "cc(=o)oc(c)=o" in reactant_str:
+            if "c(=o)o" in prod:
+                return "Acetylation (Ester)"
+            if "c(=o)n" in prod:
+                return "Acetylation (Amide)"
+            return "Acylation"
+        if "c(=o)cl" in reactant_str:
+            return "Acyl Chloride Coupling"
+        if any(s.strip() == "O" for s in reactant_smiles_list):
+            return "Hydrolysis"
+        if "[al" in reactant_str:
+            return "Friedel-Crafts"
+        if "b(o)o" in reactant_str:
+            return "Suzuki Coupling"
+        if "[na" in reactant_str or "[k" in reactant_str or "[li" in reactant_str:
+            return "Base-Mediated"
+        if "oc(=o)" in prod and "o" in reactant_str:
+            return "Esterification"
+        if "nc(=o)" in prod or "c(=o)n" in prod:
+            return "Amide Bond Formation"
+        if "ci" in reactant_str or "cbr" in reactant_str:
+            return "Alkylation"
+    except Exception:
+        pass
+    return "Retrosynthetic Disconnection"
 
 
-def display_molecule_card(smiles, in_stock, reward_calc, stock_list, is_target=False):
-    """Display a molecule card with image, name, SMILES, SA score, and role."""
-    img = render_molecule_image(smiles, size=(250, 250))
-    if img is not None:
-        st.image(img, use_container_width=True)
-
-    # Show name if known
+def display_molecule_compact(smiles, stock_list):
+    """Compact molecule display: SVG + name, for the diagram."""
+    show_molecule(smiles, max_width=200)
     name = molecule_label(smiles, stock_list)
     if name:
-        st.markdown(f"**{name}**")
-
-    st.code(smiles, language=None)
-
-    sa = reward_calc.compute_sascore(smiles)
-    if sa is not None:
-        st.caption(f"SA Score: {sa:.2f} (lower = easier to make)")
-
-    st.markdown(role_badge(in_stock, is_target))
+        st.caption(f"**{name}**")
+    else:
+        st.caption(f"`{smiles[:40]}`")
+    if stock_list.is_buyable(smiles):
+        st.markdown(":green[In Stock]")
 
 
 def _clean_route(route, ancestor_smiles=None):
@@ -219,15 +268,14 @@ def _clean_route(route, ancestor_smiles=None):
         # Skip if: same as any ancestor (circular), already seen, or empty
         if not cs or cs in ancestor_smiles or cs in seen:
             continue
-        # Skip if it's the same molecule as the parent
+        # Skip if RDKit can't parse it (invalid/truncated SMILES)
+        child_mol = Chem.MolFromSmiles(cs)
+        if child_mol is None:
+            continue
+        # Skip if it's the same molecule as the parent (canonical match)
         try:
             parent_mol = Chem.MolFromSmiles(smiles)
-            child_mol = Chem.MolFromSmiles(cs)
-            if (
-                parent_mol
-                and child_mol
-                and Chem.MolToSmiles(parent_mol) == Chem.MolToSmiles(child_mol)
-            ):
+            if parent_mol and Chem.MolToSmiles(parent_mol) == Chem.MolToSmiles(child_mol):
                 continue
         except Exception:
             pass
@@ -250,11 +298,42 @@ def _clean_route(route, ancestor_smiles=None):
     }
 
 
-def display_retrosynthesis_diagram(route, reward_calc, stock_list, step=1, max_depth=4):
-    """Display a retrosynthesis route as a step-by-step diagram.
+def _render_reactants_row(display_children, stock_list):
+    """Render reactant molecules side by side with + signs between them."""
+    n = len(display_children)
+    if n == 0:
+        return
+    # Build columns: [mol] [+] [mol] [+] [mol] ...
+    col_spec = []
+    for i in range(n):
+        col_spec.append(2)
+        if i < n - 1:
+            col_spec.append(0.3)
+    cols = st.columns(col_spec)
+    col_idx = 0
+    for i, child in enumerate(display_children):
+        with cols[col_idx]:
+            display_molecule_compact(child.get("smiles", ""), stock_list)
+        col_idx += 1
+        if i < n - 1:
+            with cols[col_idx]:
+                st.markdown(
+                    "<div style='display:flex; align-items:center; "
+                    "justify-content:center; height:200px; font-size:2em;'>+</div>",
+                    unsafe_allow_html=True,
+                )
+            col_idx += 1
 
-    Shows: Target → arrow → Reactants → arrow → deeper reactants...
-    Cleans the route tree first to remove self-references and duplicates.
+
+def display_retrosynthesis_diagram(route, reward_calc, stock_list, step=1, max_depth=4):
+    """Display a retrosynthesis route as a visual diagram.
+
+    Layout per step (forward synthesis direction):
+        [Reactant 1] + [Reactant 2]
+             ↓ Reaction Type
+        [Product structure]
+
+    Reagent details are in expandable sections.
     """
     # Clean the route on first call
     if step == 1:
@@ -262,52 +341,96 @@ def display_retrosynthesis_diagram(route, reward_calc, stock_list, step=1, max_d
 
     smiles = route.get("smiles", "")
     children = route.get("children", [])
-    in_stock = route.get("in_stock", stock_list.is_buyable(smiles))
+    display_children = children[:4]
 
-    # Show the target molecule at top level
-    if step == 1:
-        display_molecule_card(smiles, in_stock, reward_calc, stock_list, is_target=True)
-
-    if not children:
+    if not display_children:
         return
 
-    # Reaction arrow + header
-    st.markdown("---")
-    product_name = molecule_label(smiles, stock_list) or smiles
-    st.markdown(
-        f"### Step {step}: Retrosynthetic Disconnection\n\n"
-        f"**{product_name}** can be synthesized from:"
-    )
-
-    # Show reactants side by side (cap at 4 columns for readability)
-    display_children = children[:4]
-    cols = st.columns(max(len(display_children), 1))
-    for i, child in enumerate(display_children):
-        with cols[i]:
-            cs = child.get("smiles", "")
-            ci = child.get("in_stock", stock_list.is_buyable(cs))
-            display_molecule_card(cs, ci, reward_calc, stock_list)
-
-    # Equation summary
-    reactant_names = []
+    # Separate valid and invalid reactants
+    valid_children = []
+    invalid_smiles = []
     for child in display_children:
         cs = child.get("smiles", "")
-        n = molecule_label(cs, stock_list)
-        reactant_names.append(n if n else cs[:30])
-    st.markdown(f"> **{' + '.join(reactant_names)}** --> **{product_name}**")
+        if cs and Chem.MolFromSmiles(cs) is not None:
+            valid_children.append(child)
+        elif cs:
+            invalid_smiles.append(cs)
 
-    # Recurse into intermediates (not in stock, have children)
+    if not valid_children:
+        st.warning(f"Step {step}: Model produced no valid reactants.")
+        return
+
+    # Infer reaction type
+    reactant_smiles = [c.get("smiles", "") for c in valid_children]
+    reaction_type = infer_reaction_type(smiles, reactant_smiles)
+    product_name = molecule_label(smiles, stock_list) or smiles
+
+    # ---- First: recurse into intermediates (deepest steps shown first) ----
     if step < max_depth:
-        for child in display_children:
+        for child in valid_children:
             cs = child.get("smiles", "")
-            ci = child.get("in_stock", stock_list.is_buyable(cs))
+            ci = stock_list.is_buyable(cs)
             if child.get("children") and not ci:
-                st.markdown("---")
                 child_name = molecule_label(cs, stock_list) or cs
-                st.markdown(f"#### Decomposing intermediate: **{child_name}**")
+                st.markdown(f"##### Decomposing: **{child_name}**")
                 display_retrosynthesis_diagram(
                     child, reward_calc, stock_list, step=step + 1, max_depth=max_depth
                 )
+                st.markdown("---")
+
+    # ---- DIAGRAM: Reactants → Arrow → Product (forward direction) ----
+
+    # Reactants
+    _render_reactants_row(valid_children, stock_list)
+
+    # Reaction arrow pointing DOWN (reactants above → product below)
+    st.markdown(
+        f"<div style='text-align:center; padding: 10px 0;'>"
+        f"<span style='font-size: 2em;'>⬇</span><br>"
+        f"<span style='background-color: #262730; padding: 4px 12px; "
+        f"border-radius: 12px; font-size: 0.9em;'>"
+        f"Step {step}: {reaction_type}</span></div>",
+        unsafe_allow_html=True,
+    )
+
+    # Product structure (centered)
+    col_l, col_center, col_r = st.columns([1, 2, 1])
+    with col_center:
+        show_molecule(smiles, max_width=300)
+        st.markdown(f"**{product_name}**")
+        if step == 1:
+            st.caption(":red[TARGET PRODUCT]")
+        else:
+            st.caption(":orange[INTERMEDIATE]")
+
+    # Note invalid predictions if any
+    if invalid_smiles:
+        st.caption(
+            f"Note: {len(invalid_smiles)} invalid prediction(s) "
+            f"were filtered out from this step."
+        )
+
+    # Reagent details in expander
+    reactant_names = []
+    for c in valid_children:
+        n = molecule_label(c.get("smiles", ""), stock_list)
+        reactant_names.append(n if n else c.get("smiles", "")[:30])
+
+    with st.expander(f"Step {step} details — {reaction_type}", expanded=False):
+        st.markdown(f"**Reaction:** {' + '.join(reactant_names)} → {product_name}")
+        st.markdown(f"**Type:** {reaction_type}")
+        for c in valid_children:
+            cs = c.get("smiles", "")
+            ci = stock_list.is_buyable(cs)
+            sa = reward_calc.compute_sascore(cs)
+            name = molecule_label(cs, stock_list) or cs
+            status = ":green[In Stock]" if ci else ":orange[Not in stock]"
+            sa_str = f"{sa:.2f}" if sa else "N/A"
+            st.markdown(f"- **{name}** — SA: {sa_str} — {status}")
+        if invalid_smiles:
+            st.markdown("**Filtered (invalid SMILES):**")
+            for inv in invalid_smiles:
+                st.markdown(f"- `{inv}`")
 
 
 def display_results(result, reward_calc, stock_list):
@@ -327,65 +450,56 @@ def display_results(result, reward_calc, stock_list):
     best_route = routes[0]
     display_retrosynthesis_diagram(best_route, reward_calc, stock_list)
 
-    # ---- Route Summary ----
+    # ---- Summary + Stats (compact) ----
     st.markdown("---")
-    st.subheader("Route Summary")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Score", f"{best_score:.3f}")
+    c2.metric("Simulations", stats.get("simulations", "N/A"))
+    c3.metric("Search Time", f"{stats.get('time_seconds', 0):.1f}s")
+    c4.metric("Routes Found", stats.get("routes_found", 0))
 
-    # Collect unique molecules from the cleaned route
-    clean = _clean_route(best_route)
-    starting_set = set()
-    intermediate_set = set()
+    # Materials summary in expander
+    with st.expander("Materials Summary"):
+        clean = _clean_route(best_route)
+        starting_set = set()
+        intermediate_set = set()
 
-    def collect_molecules(node, depth=0):
-        s = node.get("smiles", "")
-        if not s:
-            return
-        ins = node.get("in_stock", stock_list.is_buyable(s))
-        kids = node.get("children", [])
-        if not kids:
-            if ins:
-                starting_set.add(s)
+        def collect_molecules(node, depth=0):
+            s = node.get("smiles", "")
+            if not s:
+                return
+            ins = node.get("in_stock", stock_list.is_buyable(s))
+            kids = node.get("children", [])
+            if not kids:
+                if ins:
+                    starting_set.add(s)
+                else:
+                    intermediate_set.add(s)
             else:
-                intermediate_set.add(s)
-        else:
-            if depth > 0:
-                intermediate_set.add(s)
-            for c in kids:
-                collect_molecules(c, depth + 1)
+                if depth > 0:
+                    intermediate_set.add(s)
+                for c in kids:
+                    collect_molecules(c, depth + 1)
 
-    collect_molecules(clean)
-    starting_materials = list(starting_set)
-    intermediates = list(intermediate_set)
+        collect_molecules(clean)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**Starting Materials (In Stock):**")
-        if starting_materials:
-            for sm in starting_materials:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Starting Materials (In Stock):**")
+            for sm in starting_set:
                 name = molecule_label(sm, stock_list)
                 label = f"{name} (`{sm}`)" if name else f"`{sm}`"
                 st.markdown(f"- :green[{label}]")
-        else:
-            st.markdown("- *None found in stock*")
-
-    with col2:
-        st.markdown("**Intermediates:**")
-        if intermediates:
-            for im in intermediates:
+            if not starting_set:
+                st.markdown("- *None found in stock*")
+        with col2:
+            st.markdown("**Intermediates:**")
+            for im in intermediate_set:
                 name = molecule_label(im, stock_list)
                 label = f"{name} (`{im}`)" if name else f"`{im}`"
                 st.markdown(f"- :orange[{label}]")
-        else:
-            st.markdown("- *Direct synthesis (no intermediates)*")
-
-    # ---- Search Stats ----
-    st.markdown("---")
-    st.subheader("Search Statistics")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Simulations", stats.get("simulations", "N/A"))
-    c2.metric("Search Time", f"{stats.get('time_seconds', 0):.1f}s")
-    c3.metric("Routes Found", stats.get("routes_found", 0))
-    c4.metric("Best Score", f"{best_score:.3f}")
+            if not intermediate_set:
+                st.markdown("- *Direct synthesis*")
 
     if len(routes) > 1:
         with st.expander(f"View all {len(routes)} routes"):
