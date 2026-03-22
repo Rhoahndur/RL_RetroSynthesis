@@ -98,7 +98,7 @@ def prepare_dataset(
     output_dir: str = "data/processed",
     stock_path: str = "data/stock/buyables.csv",
     push: bool = False,
-    hub_name: str | None = None,
+    hub_name=None,
 ) -> None:
     """Download USPTO-50K, format as HuggingFace Dataset with question/answer/info columns.
 
@@ -109,7 +109,7 @@ def prepare_dataset(
         hub_name: Hub dataset name (required if push is True).
     """
     from datasets import Dataset, DatasetDict
-    from tdc import RetroSyn
+    from tdc.generation import RetroSyn
 
     # 1. Download USPTO-50K
     print("Downloading USPTO-50K via TDC...")

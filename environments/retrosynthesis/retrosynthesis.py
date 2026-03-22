@@ -350,8 +350,14 @@ def _check_atom_conservation(content: str, product_smiles: str) -> float:
 # ---------------------------------------------------------------------------
 
 
+HF_DATASET = "rhoahndur/retrosyn-targets"
+
+
 def build_dataset(split: str, difficulty: str) -> Dataset:
     """Build a HuggingFace Dataset for the given split.
+
+    Loads USPTO-50K product SMILES from HuggingFace Hub. Falls back to
+    the inline molecule lists if the Hub dataset is unavailable.
 
     Args:
         split: "train" or "test".
@@ -360,12 +366,45 @@ def build_dataset(split: str, difficulty: str) -> Dataset:
     Returns:
         Dataset with columns: question, answer, info.
     """
+    from datasets import load_dataset as hf_load_dataset
+
+    stock_list = sorted(BUYABLE_SMILES)
+
+    # Try loading from HuggingFace Hub
+    try:
+        hf_split = "test" if split == "test" else "train"
+        ds = hf_load_dataset(HF_DATASET, split=hf_split)
+
+        rows = []
+        for row in ds:
+            product = row.get("question", "").replace("Predict the reactants for: ", "")
+            answer = row.get("answer", "")
+            if not product:
+                continue
+            info = json.dumps(
+                {
+                    "product_smiles": product,
+                    "stock_list": stock_list,
+                }
+            )
+            rows.append(
+                {
+                    "question": f"Predict the reactants for: {product}",
+                    "answer": answer,
+                    "info": info,
+                }
+            )
+
+        if rows:
+            return Dataset.from_list(rows)
+    except Exception:
+        pass
+
+    # Fallback to inline molecules
     if split == "test":
         molecules = DEMO_MOLECULES
     else:
         molecules = DEMO_MOLECULES + TRAINING_MOLECULES
-
-    stock_list = sorted(BUYABLE_SMILES)
 
     rows = []
     for mol in molecules:
@@ -394,45 +433,56 @@ def build_dataset(split: str, difficulty: str) -> Dataset:
 
 
 def build_rubric() -> vf.Rubric:
-    """Build the reward rubric with 5 weighted reward functions."""
+    """Build the reward rubric with 5 weighted reward functions.
+
+    Key design: every function returns a minimum floor (0.05-0.15) for
+    any non-empty output. This prevents reward collapse where the model
+    learns to output nothing to avoid penalties.
+    """
 
     # ------------------------------------------------------------------
     # 1. Format reward (weight 0.1)
     # ------------------------------------------------------------------
     async def format_reward(completion, **kwargs) -> float:
-        """Check that the output looks like valid SMILES notation
-        (no explanatory text, markdown, etc.)."""
+        """Check that the output looks like valid SMILES notation.
+        Gives partial credit for outputs that contain some SMILES-like chars."""
         try:
             content = completion[-1]["content"].strip()
             if not content:
                 return 0.0
+            # Full match: pure SMILES
             if _SMILES_RE.match(content):
                 return 1.0
-            return 0.0
+            # Partial credit: contains SMILES-like content mixed with text
+            # (model is trying but adding explanation)
+            smiles_chars = sum(1 for c in content if c in "()[]=#@+-./\\CNOSPFIBrcnos0123456789")
+            ratio = smiles_chars / len(content) if content else 0
+            return max(0.1, min(1.0, ratio))
         except Exception:
-            return 0.0
+            return 0.1
 
     # ------------------------------------------------------------------
     # 2. Validity reward (weight 0.25)
     # ------------------------------------------------------------------
     async def validity_reward(completion, **kwargs) -> float:
-        """Return the fraction of reactant fragments that parse as valid
-        SMILES via RDKit."""
+        """Return the fraction of reactant fragments that parse as valid SMILES.
+        Gives a floor of 0.1 for any non-empty attempt."""
         try:
             content = completion[-1]["content"].strip()
             if not content:
                 return 0.0
             result = await asyncio.to_thread(_check_validity, content)
-            return result
+            # Floor: even if nothing parses, trying is worth 0.1
+            return max(0.1, result)
         except Exception:
-            return 0.0
+            return 0.1
 
     # ------------------------------------------------------------------
-    # 3. SA-score reward (weight 0.2)
+    # 3. SA-score reward (weight 0.15)
     # ------------------------------------------------------------------
     async def sascore_reward(completion, info, **kwargs) -> float:
-        """Reward based on whether reactants are simpler (lower SA score)
-        than the target product."""
+        """Reward based on whether reactants are simpler than the product.
+        Returns 0.5 (neutral) as baseline when comparison isn't possible."""
         try:
             if isinstance(info, str):
                 info = json.loads(info)
@@ -441,16 +491,17 @@ def build_rubric() -> vf.Rubric:
             if not content:
                 return 0.0
             result = await asyncio.to_thread(_check_sascore, content, product_smiles)
-            return result
+            # If no valid reactants to compare, return neutral 0.5 not 0.0
+            return result if result > 0 else 0.3
         except Exception:
-            return 0.0
+            return 0.3
 
     # ------------------------------------------------------------------
-    # 4. Stock reward (weight 0.3)
+    # 4. Stock reward (weight 0.25)
     # ------------------------------------------------------------------
     async def stock_reward(completion, info, **kwargs) -> float:
-        """Return the fraction of predicted reactants that are
-        commercially available (present in the stock list)."""
+        """Return the fraction of predicted reactants that are buyable.
+        Gives a small floor for any valid SMILES output."""
         try:
             if isinstance(info, str):
                 info = json.loads(info)
@@ -460,16 +511,20 @@ def build_rubric() -> vf.Rubric:
             if not content:
                 return 0.0
             result = await asyncio.to_thread(_check_stock, content, stock_set)
+            # Give 0.05 floor if at least some valid SMILES were produced
+            validity = await asyncio.to_thread(_check_validity, content)
+            if validity > 0 and result == 0:
+                return 0.05
             return result
         except Exception:
-            return 0.0
+            return 0.05
 
     # ------------------------------------------------------------------
-    # 5. Atom conservation reward (weight 0.15)
+    # 5. Atom conservation reward (weight 0.1)
     # ------------------------------------------------------------------
     async def atom_conservation_reward(completion, info, **kwargs) -> float:
-        """Return the fraction of product atoms that are accounted for
-        in the combined reactants."""
+        """Return the fraction of product atoms covered by reactants.
+        Returns small positive for any valid SMILES output."""
         try:
             if isinstance(info, str):
                 info = json.loads(info)
@@ -478,20 +533,48 @@ def build_rubric() -> vf.Rubric:
             if not content:
                 return 0.0
             result = await asyncio.to_thread(_check_atom_conservation, content, product_smiles)
-            return result
+            return max(0.1, result) if result > 0 else 0.1
+        except Exception:
+            return 0.1
+
+    # ------------------------------------------------------------------
+    # 6. Non-empty attempt reward (weight 0.15)
+    # ------------------------------------------------------------------
+    async def attempt_reward(completion, **kwargs) -> float:
+        """Reward for producing any non-empty output with reasonable length.
+        Prevents the model from collapsing to empty outputs.
+
+        - Empty: 0.0
+        - Very short (< 3 chars): 0.3
+        - Short but has dots (multiple reactants): 0.7
+        - Reasonable length: 1.0
+        """
+        try:
+            content = completion[-1]["content"].strip()
+            if not content:
+                return 0.0
+            if len(content) < 3:
+                return 0.3
+            if "." in content:
+                return 1.0  # Multiple reactants = good structure
+            if len(content) >= 5:
+                return 0.8  # At least a single reactant attempt
+            return 0.5
         except Exception:
             return 0.0
 
     # Build and return the rubric
+    # Weights: attempt(0.15) + format(0.1) + validity(0.25) + sascore(0.15) + stock(0.25) + atoms(0.1) = 1.0
     return vf.Rubric(
         funcs=[
+            attempt_reward,
             format_reward,
             validity_reward,
             sascore_reward,
             stock_reward,
             atom_conservation_reward,
         ],
-        weights=[0.1, 0.25, 0.2, 0.3, 0.15],
+        weights=[0.15, 0.1, 0.25, 0.15, 0.25, 0.1],
     )
 
 

@@ -1,1 +1,224 @@
-start
+---
+title: Retrosynthesis AI
+emoji: 🧪
+colorFrom: blue
+colorTo: green
+sdk: streamlit
+sdk_version: "1.50.0"
+python_version: "3.10"
+app_file: app/main.py
+pinned: false
+models:
+  - sagawa/ReactionT5v2-retrosynthesis
+datasets:
+  - rhoahndur/retrosyn-targets
+preload_from_hub:
+  - sagawa/ReactionT5v2-retrosynthesis
+tags:
+  - chemistry
+  - retrosynthesis
+  - reinforcement-learning
+startup_duration_timeout: "1h"
+---
+
+# Retrosynthesis AI
+
+RL-powered retrosynthetic route prediction. Given a target molecule as a SMILES string, the system predicts commercially available starting materials and synthesis routes using reinforcement learning, Monte Carlo Tree Search, and RDKit-based reward scoring.
+
+Built at [SundAI](https://sundai.club) hackathon (March 2026).
+
+## How It Works
+
+1. **Input**: A target molecule SMILES (e.g. Ibuprofen: `CC(C)Cc1ccc(cc1)C(C)C(=O)O`)
+2. **Search**: MCTS explores retrosynthetic disconnections guided by the RL policy
+3. **Scoring**: Multi-component rewards evaluate validity, synthetic accessibility, and stock availability
+4. **Output**: Ranked synthesis routes with molecule visualizations and buyability indicators
+
+The system supports two inference backends:
+- **Prime Intellect API** (primary) — RL-trained Qwen3-4B LoRA adapter via OpenAI-compatible endpoint
+- **Local ReactionT5** (fallback) — `sagawa/ReactionT5v2-retrosynthesis` with MCTS
+
+## Project Structure
+
+```
+├── app/
+│   └── main.py                  # Streamlit web application
+├── configs/
+│   └── rl/
+│       ├── retrosynthesis.toml          # Quick validation (50 steps, Qwen3-4B)
+│       ├── retrosynthesis-full.toml     # Full training (300 steps, Qwen3-30B)
+│       └── retrosynthesis-continue.toml # Resume from checkpoint
+├── data/
+│   └── stock/
+│       ├── buyables.csv         # 246 commercially available molecules
+│       └── loader.py            # StockList — O(1) canonical SMILES lookup
+├── env/
+│   ├── ChemEnv.py               # Gym-style step-based RL environment
+│   ├── MCTS.py                  # Monte Carlo Tree Search (UCT selection)
+│   └── Rewards.py               # Multi-objective reward calculator
+├── environments/
+│   └── retrosynthesis/
+│       ├── retrosynthesis.py    # Verifiers environment for Prime Intellect RL
+│       └── pyproject.toml       # Environment package config
+├── models/
+│   ├── policy.py                # RetroPolicy — ReactionT5 wrapper with RL interface
+│   └── checkpoints/             # Saved .pt files (gitignored)
+├── scripts/
+│   ├── inference.py             # Local MCTS inference
+│   ├── inference_pi.py          # Prime Intellect API inference
+│   ├── train_rl.py              # REINFORCE training loop
+│   ├── prepare_data.py          # Download/process USPTO-50K via TDC
+│   ├── prepare_pi_dataset.py    # Format dataset for HuggingFace Hub upload
+│   └── setup_prime.sh           # Prime Intellect pod provisioning script
+└── tests/                       # 75 unit tests
+```
+
+## Quickstart
+
+### Prerequisites
+
+- Python 3.10+
+- [RDKit](https://www.rdkit.org/) (installed via `rdkit-pypi`)
+
+### Install
+
+```bash
+pip install -r requirements.txt
+```
+
+### Run the Streamlit App
+
+```bash
+streamlit run app/main.py
+```
+
+The app launches with preset buttons for four demo molecules:
+
+| Molecule | SMILES |
+|---|---|
+| Aspirin | `CC(=O)Oc1ccccc1C(=O)O` |
+| Acetaminophen | `CC(=O)Nc1ccc(O)cc1` |
+| Caffeine | `Cn1c(=O)c2c(ncn2C)n(C)c1=O` |
+| Ibuprofen | `CC(C)Cc1ccc(cc1)C(C)C(=O)O` |
+
+Select "Prime Intellect API" in the sidebar and provide your API key to use the RL-trained model, or select "Local Model (ReactionT5)" to run inference locally.
+
+### Run Inference from CLI
+
+```bash
+# Local model
+python scripts/inference.py --target "CC(=O)Oc1ccccc1C(=O)O"
+
+# Prime Intellect API
+python scripts/inference_pi.py --target "CC(=O)Oc1ccccc1C(=O)O" --model <deployment-id>
+```
+
+## Reward Function
+
+Retrosynthetic predictions are scored by a weighted combination of four components:
+
+| Component | Weight | Description |
+|---|---|---|
+| **Validity** | 0.30 | All output SMILES parse as valid RDKit molecules |
+| **Plausibility** | 0.20 | Molecules pass RDKit sanitization (no valency violations) |
+| **SA Score** | 0.20 | Reactants are simpler than the target (lower synthetic accessibility score) |
+| **Stock Match** | 0.30 | Reactants are found in the 246-molecule buyables list |
+
+The verifiers environment for Prime Intellect training adds a fifth component — **atom conservation** (0.15) — and a **format reward** (0.10) that penalizes non-SMILES text in the output.
+
+## Training
+
+### Prime Intellect (GRPO + LoRA)
+
+The primary training path uses Prime Intellect's managed RL platform with a custom `verifiers` environment.
+
+```bash
+# Install the verifiers environment locally
+prime env install retrosynthesis
+
+# Validate with a quick eval
+prime eval run retrosynthesis -m gpt-4.1-mini -n 4 -r 1
+
+# Push to Hub
+prime env push --path ./environments/retrosynthesis
+
+# Launch training (quick validation)
+prime rl run configs/rl/retrosynthesis.toml
+
+# Launch training (full run with Qwen3-30B + wandb)
+prime rl run configs/rl/retrosynthesis-full.toml
+
+# Monitor
+prime rl logs <run-id> -f
+```
+
+After training, deploy the LoRA adapter:
+
+```bash
+prime deployments create <adapter-id>
+```
+
+### Local REINFORCE (fallback)
+
+```bash
+# Prepare USPTO-50K training data
+python scripts/prepare_data.py
+
+# Train locally
+python scripts/train_rl.py --num_steps 5000 --batch_size 16
+
+# Resume from checkpoint
+python scripts/train_rl.py --resume models/checkpoints/<checkpoint>.pt
+```
+
+## Development
+
+### Linting
+
+```bash
+make lint          # Check
+make lint-fix      # Auto-fix + format
+```
+
+Uses [Ruff](https://docs.astral.sh/ruff/) (v0.8.6) with pycodestyle, pyflakes, isort, pyupgrade, flake8-bugbear, and flake8-simplify rules.
+
+### Tests
+
+```bash
+make test          # Fast tests only (skips model downloads)
+make test-all      # All tests including slow/GPU tests
+```
+
+75 tests across 7 test files covering the stock list, rewards, policy, MCTS, ChemEnv, inference, and training helpers.
+
+### CI
+
+GitHub Actions runs lint and fast tests on every push/PR to `main`.
+
+## Architecture
+
+- **StockList** (`data/stock/loader.py`) — Loads `buyables.csv`, canonicalizes all SMILES via RDKit, provides O(1) set lookup for buyability checks.
+- **RewardCalculator** (`env/Rewards.py`) — Computes validity, plausibility, SA score delta, and stock match rewards. Includes self-contained SA score implementation (no external dependency).
+- **RetroPolicy** (`models/policy.py`) — Wraps `sagawa/ReactionT5v2-retrosynthesis` (T5 seq2seq) with temperature sampling, log-probability computation, and checkpoint save/load for REINFORCE training.
+- **MCTS** (`env/MCTS.py`) — Full Monte Carlo Tree Search with UCT selection, policy-guided expansion, reward-based simulation, and backpropagation. Finds multi-step routes to buyable starting materials.
+- **ChemEnv** (`env/ChemEnv.py`) — Gym-style wrapper combining policy, rewards, and stock list into a step-based interface for episodic RL.
+- **Verifiers Environment** (`environments/retrosynthesis/`) — Self-contained `vf.SingleTurnEnv` package for Prime Intellect hosted RL training. Includes inline dataset (USPTO-50K + demo molecules), async RDKit reward rubric, and 200+ buyable SMILES.
+
+## Tech Stack
+
+| Component | Technology |
+|---|---|
+| Retrosynthesis model | ReactionT5v2 (local) / Qwen3-4B (PI) |
+| RL algorithm | REINFORCE (local) / GRPO (PI) |
+| Chemistry engine | RDKit |
+| Training data | USPTO-50K via TDC |
+| Training platform | Prime Intellect |
+| Frontend | Streamlit + py3Dmol |
+| Inference API | OpenAI-compatible (Prime Intellect) |
+| CI/CD | GitHub Actions + ruff + pytest |
+| Linting | Ruff |
+| Pre-commit | ruff check + ruff format |
+
+## License
+
+This project was built at a hackathon and is provided as-is for educational and research purposes.
