@@ -7,6 +7,9 @@ Usage:
     streamlit run app/main.py
 """
 
+from __future__ import annotations
+
+import os
 import sys
 from pathlib import Path
 
@@ -23,6 +26,13 @@ from rdkit.Chem import AllChem, Draw, rdMolDescriptors
 from data.stock.loader import StockList
 from env.Rewards import RewardCalculator
 from scripts.inference import load_model, run_inference
+
+try:
+    from scripts.inference_pi import create_pi_client, run_inference_pi
+
+    PI_AVAILABLE = True
+except ImportError:
+    PI_AVAILABLE = False
 
 # Preset demo molecules
 PRESETS = {
@@ -76,7 +86,16 @@ def _find_best_checkpoint() -> str | None:
 
 
 @st.cache_resource
-def load_resources():
+def load_shared_resources():
+    """Load reward calculator and stock list (used by all backends)."""
+    reward_calc = RewardCalculator()
+    stock_list = StockList()
+    stock_list.load()
+    return reward_calc, stock_list
+
+
+@st.cache_resource
+def load_local_resources():
     """Load policy model, reward calculator, and stock list.
 
     Tries to load from the best checkpoint first; falls back to the
@@ -88,12 +107,8 @@ def load_resources():
     # Load policy
     policy = load_model(checkpoint_path=ckpt_path)
 
-    # Load reward calculator
-    reward_calc = RewardCalculator()
-
-    # Load stock list
-    stock_list = StockList()
-    stock_list.load()
+    # Load shared resources
+    reward_calc, stock_list = load_shared_resources()
 
     return policy, reward_calc, stock_list
 
@@ -335,13 +350,52 @@ def main():
         "Enter a molecule SMILES to find synthesis routes from commercially available starting materials."
     )
 
-    # ---- 2. Model Loading (cached) ----
-    with st.spinner("Loading model, reward calculator, and stock list..."):
-        try:
-            policy, reward_calc, stock_list = load_resources()
-        except Exception as e:
-            st.error(f"Failed to load resources: {e}")
-            st.stop()
+    # ---- Sidebar Configuration ----
+    st.sidebar.title("Configuration")
+    backend = st.sidebar.selectbox(
+        "Inference Backend",
+        ["Prime Intellect API", "Local Model (ReactionT5)"],
+        index=0 if PI_AVAILABLE else 1,
+    )
+
+    # PI settings (only shown when PI selected)
+    pi_api_key = ""
+    pi_model_id = ""
+    if backend == "Prime Intellect API":
+        pi_api_key = st.sidebar.text_input(
+            "API Key",
+            type="password",
+            value=os.environ.get("PRIME_API_KEY", ""),
+        )
+        pi_model_id = st.sidebar.text_input("Deployment ID", value="")
+        if not pi_api_key or not pi_model_id:
+            st.sidebar.warning("Enter API key and Deployment ID to use PI backend.")
+
+    st.sidebar.markdown("---")
+    if backend == "Prime Intellect API":
+        if pi_api_key and pi_model_id:
+            st.sidebar.success("Ready: Prime Intellect API")
+        else:
+            st.sidebar.info("Configure API key and model ID above")
+    else:
+        st.sidebar.success("Ready: Local Model")
+
+    # ---- 2. Resource Loading (cached, backend-aware) ----
+    policy = None
+    if backend == "Local Model (ReactionT5)":
+        with st.spinner("Loading model, reward calculator, and stock list..."):
+            try:
+                policy, reward_calc, stock_list = load_local_resources()
+            except Exception as e:
+                st.error(f"Failed to load resources: {e}")
+                st.stop()
+    else:
+        with st.spinner("Loading reward calculator and stock list..."):
+            try:
+                reward_calc, stock_list = load_shared_resources()
+            except Exception as e:
+                st.error(f"Failed to load resources: {e}")
+                st.stop()
 
     # ---- 3. Input Section ----
     if "smiles_input" not in st.session_state:
@@ -385,14 +439,18 @@ def main():
     if search_clicked:
         with st.spinner("Searching for synthesis routes..."):
             try:
-                result = run_inference(
-                    smiles,
-                    policy,
-                    reward_calc,
-                    stock_list,
-                    max_simulations=200,
-                    time_budget=30,
-                )
+                if backend == "Prime Intellect API" and pi_api_key and pi_model_id:
+                    client = create_pi_client(api_key=pi_api_key)
+                    result = run_inference_pi(smiles, client, pi_model_id, reward_calc, stock_list)
+                else:
+                    result = run_inference(
+                        smiles,
+                        policy,
+                        reward_calc,
+                        stock_list,
+                        max_simulations=200,
+                        time_budget=30,
+                    )
             except Exception as e:
                 st.error(f"Search failed: {e}")
                 st.stop()
