@@ -51,7 +51,7 @@ The system supports two inference backends:
 ├── data/
 │   └── stock/
 │       ├── buyables.csv         # 246 commercially available molecules
-│       └── loader.py            # StockList — O(1) canonical SMILES lookup
+│       └── loader.py            # StockList — O(1) lookup + fingerprint similarity
 ├── env/
 │   ├── ChemEnv.py               # Gym-style step-based RL environment
 │   ├── MCTS.py                  # Monte Carlo Tree Search (UCT selection)
@@ -66,11 +66,13 @@ The system supports two inference backends:
 ├── scripts/
 │   ├── inference.py             # Local MCTS inference
 │   ├── inference_pi.py          # Prime Intellect API inference
-│   ├── train_rl.py              # REINFORCE training loop
+│   ├── train_rl.py              # REINFORCE training loop (GRPO-style)
+│   ├── eval_topk.py             # Top-K exact match evaluation
+│   ├── eval_mcts.py             # MCTS full-route success rate evaluation
 │   ├── prepare_data.py          # Download/process USPTO-50K via TDC
 │   ├── prepare_pi_dataset.py    # Format dataset for HuggingFace Hub upload
 │   └── setup_prime.sh           # Prime Intellect pod provisioning script
-└── tests/                       # 75 unit tests
+└── tests/                       # 95 unit tests
 ```
 
 ## Quickstart
@@ -124,7 +126,7 @@ Uses 4 weighted components via `env/Rewards.py`:
 | **Validity** | 0.30 | All output SMILES parse as valid RDKit molecules |
 | **Plausibility** | 0.20 | Molecules pass RDKit sanitization (no valency violations) |
 | **SA Score** | 0.20 | Reactants are simpler than the target (lower synthetic accessibility score) |
-| **Stock Match** | 0.30 | Reactants are found in the buyables list |
+| **Stock Match** | 0.30 | Reactants match buyables (exact or Tanimoto similarity ≥ 0.6) |
 
 Atom conservation acts as a soft multiplier — poor conservation drags down the overall reward.
 
@@ -138,7 +140,7 @@ Uses 6 async reward functions via the `verifiers` rubric in `environments/retros
 | **Format** | 0.10 | Output contains only SMILES characters, no explanatory text |
 | **Validity** | 0.25 | Fraction of reactant fragments that parse as valid SMILES |
 | **SA Score** | 0.15 | Reactants are simpler than the target (sigmoid-mapped improvement) |
-| **Stock Match** | 0.25 | Fraction of reactants found in the 74-molecule inline buyables set |
+| **Stock Match** | 0.25 | Fraction of reactants matching 73 inline buyables (exact or Tanimoto ≥ 0.6) |
 | **Atom Conservation** | 0.10 | Fraction of product atoms accounted for in combined reactants |
 
 All functions include reward floors (0.05-0.3 minimum for non-empty output) to prevent the model from collapsing to empty responses during GRPO training.
@@ -206,7 +208,7 @@ make test          # Fast tests only (skips model downloads)
 make test-all      # All tests including slow/GPU tests
 ```
 
-75 tests across 7 test files covering the stock list, rewards, policy, MCTS, ChemEnv, inference, and training helpers.
+95 tests across 9 test files covering the stock list, rewards, policy, MCTS, ChemEnv, inference, training helpers, and both evaluation scripts.
 
 ### CI
 
@@ -214,12 +216,14 @@ GitHub Actions runs lint and fast tests on every push/PR to `main`.
 
 ## Architecture
 
-- **StockList** (`data/stock/loader.py`) — Loads `buyables.csv`, canonicalizes all SMILES via RDKit, provides O(1) set lookup for buyability checks.
-- **RewardCalculator** (`env/Rewards.py`) — Computes validity, plausibility, SA score delta, and stock match rewards. Includes self-contained SA score implementation (no external dependency).
+- **StockList** (`data/stock/loader.py`) — Loads `buyables.csv`, canonicalizes all SMILES via RDKit, provides O(1) set lookup for buyability checks. Precomputes Morgan fingerprints for vectorized Tanimoto similarity via `BulkTanimotoSimilarity`.
+- **RewardCalculator** (`env/Rewards.py`) — Computes validity, plausibility, SA score delta, stock match (with soft Tanimoto similarity), and atom conservation rewards. Atom conservation acts as a soft multiplier on the weighted sum.
 - **RetroPolicy** (`models/policy.py`) — Wraps `sagawa/ReactionT5v2-retrosynthesis` (T5 seq2seq) with temperature sampling, log-probability computation, and checkpoint save/load for REINFORCE training.
-- **MCTS** (`env/MCTS.py`) — Full Monte Carlo Tree Search with UCT selection, policy-guided expansion, reward-based simulation, and backpropagation. Finds multi-step routes to buyable starting materials.
+- **MCTS** (`env/MCTS.py`) — Full Monte Carlo Tree Search with UCT selection, policy-guided expansion, reward-based simulation, backpropagation, and cycle detection. Finds multi-step routes to buyable starting materials.
 - **ChemEnv** (`env/ChemEnv.py`) — Gym-style wrapper combining policy, rewards, and stock list into a step-based interface for episodic RL.
-- **Verifiers Environment** (`environments/retrosynthesis/`) — Self-contained `vf.SingleTurnEnv` package for Prime Intellect hosted RL training. Loads USPTO-50K from HuggingFace Hub (`rhoahndur/retrosyn-targets`), falls back to 24 inline demo molecules. 6-component async RDKit reward rubric with 74 inline buyable SMILES.
+- **Verifiers Environment** (`environments/retrosynthesis/`) — Self-contained `vf.SingleTurnEnv` package for Prime Intellect hosted RL training. Loads USPTO-50K from HuggingFace Hub (`rhoahndur/retrosyn-targets`), falls back to 24 inline demo molecules. 6-component async RDKit reward rubric with 73 inline buyable SMILES and soft Tanimoto stock matching.
+- **eval_topk** (`scripts/eval_topk.py`) — Top-K exact match evaluation against ground-truth reactions, stratified by SA score difficulty (easy/medium/hard) with reaction type breakdown and blind spot flagging.
+- **eval_mcts** (`scripts/eval_mcts.py`) — MCTS full-route success rate evaluation measuring how often complete synthesis routes (all leaves buyable) are found.
 
 ## Tech Stack
 
