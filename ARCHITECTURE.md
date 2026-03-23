@@ -17,8 +17,13 @@ graph TB
     end
 
     subgraph RL["RL Training Layer"]
-        TRAIN["train_rl.py<br/>REINFORCE + baseline"]
+        TRAIN["train_rl.py<br/>REINFORCE + GRPO advantage"]
         CKPT["Checkpoint Manager<br/>Save/load/prune .pt files"]
+    end
+
+    subgraph Eval["Evaluation Layer"]
+        EVAL_TK["eval_topk.py<br/>Top-K exact match + SA buckets"]
+        EVAL_MC["eval_mcts.py<br/>Full-route success rate"]
     end
 
     subgraph Core["Core Modules"]
@@ -33,7 +38,7 @@ graph TB
     end
 
     subgraph Chem["Chemistry Engine"]
-        RDKIT["RDKit<br/>Validity · Sanitization · SAscore<br/>Mol rendering · Canonicalization"]
+        RDKIT["RDKit<br/>Validity · Sanitization · SAscore<br/>Mol rendering · Canonicalization<br/>Morgan FP · Tanimoto similarity"]
     end
 
     subgraph Data["Data Layer"]
@@ -68,6 +73,11 @@ graph TB
     TRAIN -->|"save/load"| CKPT
     TRAIN -->|"sample targets"| TARGETS
 
+    %% Eval internals
+    EVAL_TK -->|"score predictions"| REWARD
+    EVAL_MC -->|"search routes"| MCTS
+    EVAL_MC -->|"check stock"| STOCK
+
     %% ChemEnv wiring
     ENV --> POLICY
     ENV --> REWARD
@@ -76,7 +86,7 @@ graph TB
     %% Core → Foundation
     POLICY -->|"wraps"| RT5
     REWARD -->|"validity + SAscore"| RDKIT
-    STOCK -->|"canonicalize"| RDKIT
+    STOCK -->|"canonicalize + fingerprints"| RDKIT
     RDK_DRAW -->|"MolToImage"| RDKIT
     STOCK -->|"loads"| CSV
 
@@ -106,15 +116,20 @@ sequenceDiagram
 
     loop Every training step
         D->>T: Sample batch of target SMILES
-        T->>P: predict(target, temperature)
-        P-->>T: candidate reactant SMILES
-        T->>R: combined_reward(target, reactants)
-        R->>S: is_buyable(reactant)
-        S-->>R: True/False
-        R-->>T: reward ∈ [0, 1]
-        T->>P: log_prob(target, best_reactant)
-        P-->>T: log π(a|s)
-        Note over T: loss = -log_prob × (reward - baseline)
+        T->>P: predict(target, k candidates, temperature)
+        P-->>T: k candidate reactant SMILES per target
+        loop For each candidate
+            T->>R: combined_reward(target, reactants)
+            R->>S: is_buyable(reactant) + nearest_similarity()
+            S-->>R: buyable / Tanimoto score
+            R-->>T: reward ∈ [0, 1]
+        end
+        Note over T: group_mean = mean(rewards per target)
+        loop For each candidate
+            T->>P: log_prob(target, candidate)
+            P-->>T: log π(a|s)
+            Note over T: loss += -log_prob × (reward - group_mean)
+        end
         T->>P: backward() + optimizer.step()
     end
 
@@ -194,11 +209,15 @@ graph LR
         REACT["Reactant SMILES"]
     end
 
-    subgraph Rewards["Reward Components"]
+    subgraph Rewards["Reward Components (weighted)"]
         V["Validity<br/>RDKit parse<br/>weight: 0.3"]
         P["Plausibility<br/>RDKit sanitize<br/>weight: 0.2"]
         SA["SAscore Δ<br/>simpler = better<br/>weight: 0.2"]
-        BUY["Stock Match<br/>in buyables?<br/>weight: 0.3"]
+        BUY["Stock Match<br/>exact + Tanimoto ≥ 0.6<br/>weight: 0.3"]
+    end
+
+    subgraph Gate["Soft Gate (multiplier)"]
+        ATOM["Atom Conservation<br/>product atoms covered?<br/>× (0.5 + 0.5 × ratio)"]
     end
 
     subgraph Output
@@ -210,11 +229,14 @@ graph LR
     PROD --> SA
     REACT --> SA
     REACT --> BUY
+    PROD --> ATOM
+    REACT --> ATOM
 
     V -->|"× 0.3"| R
     P -->|"× 0.2"| R
     SA -->|"× 0.2"| R
     BUY -->|"× 0.3"| R
+    ATOM -->|"soft gate"| R
 ```
 
 ## Module Dependency Graph
@@ -246,6 +268,11 @@ graph BT
 
     INF --> APP["Streamlit App<br/>app/main.py"]
     INF_PI --> APP
+
+    REWARD --> EVAL_TK["eval_topk.py"]
+    MCTS --> EVAL_MC["eval_mcts.py"]
+    REWARD --> EVAL_MC
+    STOCK --> EVAL_MC
 ```
 
 ## Infrastructure Topology
@@ -327,11 +354,27 @@ graph TD
     subgraph scripts["scripts/"]
         TRAIN_F["train_rl.py"]
         INF_F["inference.py"]
+        INF_PI_F["inference_pi.py"]
+        EVAL_TK_F["eval_topk.py"]
+        EVAL_MC_F["eval_mcts.py"]
         PREP_F["prepare_data.py"]
+        PREP_PI_F["prepare_pi_dataset.py"]
         SETUP_F["setup_prime.sh"]
     end
 
     subgraph app["app/"]
         MAIN_F["main.py (Streamlit)"]
+    end
+
+    subgraph tests["tests/ (95 tests)"]
+        T_STOCK["test_stock_list.py"]
+        T_REWARDS["test_rewards.py"]
+        T_MCTS["test_mcts.py"]
+        T_CHEMENV["test_chemenv.py"]
+        T_POLICY["test_policy.py"]
+        T_INF["test_inference.py"]
+        T_TRAIN["test_train_helpers.py"]
+        T_EVAL_TK["test_eval_topk.py"]
+        T_EVAL_MC["test_eval_mcts.py"]
     end
 ```
