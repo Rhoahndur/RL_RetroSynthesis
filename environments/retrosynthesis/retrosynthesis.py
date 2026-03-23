@@ -336,7 +336,8 @@ def _check_stock(content: str, stock_set: set) -> float:
             mol = Chem.MolFromSmiles(frag)
             if mol is not None:
                 frag_fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
-                max_sim = max(DataStructs.TanimotoSimilarity(frag_fp, bfp) for bfp in buyable_fps)
+                sims = DataStructs.BulkTanimotoSimilarity(frag_fp, buyable_fps)
+                max_sim = max(sims) if sims else 0.0
                 if max_sim > 0.6:
                     total_score += (max_sim - 0.6) / 0.4
     return total_score / len(fragments)

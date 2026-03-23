@@ -11,6 +11,10 @@ from typing import Optional
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors
 
+# Soft stock matching: partial credit for Tanimoto similarity above this threshold
+STOCK_SIMILARITY_THRESHOLD = 0.6
+STOCK_SIMILARITY_SCALE = 1.0 - STOCK_SIMILARITY_THRESHOLD  # 0.4
+
 # Default reward component weights
 DEFAULT_WEIGHTS: dict[str, float] = {
     "validity": 0.3,
@@ -145,8 +149,8 @@ class RewardCalculator:
             # Soft reward: partial credit for molecules close to buyables
             if hasattr(stock_list, "nearest_similarity"):
                 similarity = stock_list.nearest_similarity(smiles)
-                if similarity > 0.6:
-                    return (similarity - 0.6) / 0.4
+                if similarity > STOCK_SIMILARITY_THRESHOLD:
+                    return (similarity - STOCK_SIMILARITY_THRESHOLD) / STOCK_SIMILARITY_SCALE
             return 0.0
         except Exception:
             return 0.0

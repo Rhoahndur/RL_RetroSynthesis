@@ -305,9 +305,9 @@ def train(args: argparse.Namespace) -> None:
                 valid_samples += 1
 
             # Track statistics using best candidate from the group
-            best_reward = max(sample_rewards)
-            rewards_list.append(best_reward)
-            best_candidate = candidates[sample_rewards.index(best_reward)]
+            best_sample_reward = max(sample_rewards)
+            rewards_list.append(best_sample_reward)
+            best_candidate = candidates[sample_rewards.index(best_sample_reward)]
             best_reactant_list = best_candidate.split(".")
 
             all_valid = all(reward_calc.validity_reward(r) > 0.5 for r in best_reactant_list)

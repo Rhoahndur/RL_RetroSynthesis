@@ -125,12 +125,8 @@ class StockList:
             if mol is None:
                 return 0.0
             fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
-            max_sim = 0.0
-            for stock_fp in self._fingerprints:
-                sim = DataStructs.TanimotoSimilarity(fp, stock_fp)
-                if sim > max_sim:
-                    max_sim = sim
-            return max_sim
+            similarities = DataStructs.BulkTanimotoSimilarity(fp, self._fingerprints)
+            return max(similarities) if similarities else 0.0
         except Exception:
             return 0.0
 
