@@ -41,8 +41,8 @@ environments/retrosynthesis/.prime/
 *.safetensors
 
 # Planning docs
-tasks.md                                                                                                                        
-PLAN.md                                                                                                                         
+*tasks.md                                                                                                                        
+*PLAN.md                                                                                                                         
 project_description.md                                                                                                          
 Claude.md 
 
