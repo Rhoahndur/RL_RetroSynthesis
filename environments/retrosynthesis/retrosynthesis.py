@@ -15,7 +15,7 @@ from typing import Optional
 import verifiers as vf
 from datasets import Dataset
 from rdkit import Chem
-from rdkit.Chem import Descriptors, rdMolDescriptors
+from rdkit.Chem import AllChem, DataStructs, Descriptors, rdMolDescriptors
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -113,6 +113,24 @@ BUYABLE_SMILES = {
     "CC(=O)c1ccc(CC(C)C)cc1",
     "O=C1OC(=O)c2ccccc21",
 }
+
+# Precomputed Morgan fingerprints for soft stock matching
+_BUYABLE_FINGERPRINTS: Optional[list] = None
+
+
+def _get_buyable_fingerprints() -> list:
+    """Lazily compute Morgan fingerprints for all buyable SMILES."""
+    global _BUYABLE_FINGERPRINTS
+    if _BUYABLE_FINGERPRINTS is None:
+        fps = []
+        for smi in BUYABLE_SMILES:
+            mol = Chem.MolFromSmiles(smi)
+            if mol is not None:
+                fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+                fps.append(fp)
+        _BUYABLE_FINGERPRINTS = fps
+    return _BUYABLE_FINGERPRINTS
+
 
 # ---------------------------------------------------------------------------
 # Demo molecules with known retrosynthetic answers
@@ -297,18 +315,31 @@ def _check_sascore(content: str, product_smiles: str) -> float:
 
 
 def _check_stock(content: str, stock_set: set) -> float:
-    """Synchronous helper: return fraction of reactants that are buyable."""
+    """Synchronous helper: return stock score with soft similarity matching.
+
+    Exact matches get 1.0 per fragment. Non-matches get partial credit
+    based on Morgan fingerprint Tanimoto similarity (>0.6 threshold).
+    """
     parts = content.split(".")
     fragments = [p.strip() for p in parts if p.strip()]
     if not fragments:
         return 0.0
 
-    buyable = 0
+    buyable_fps = _get_buyable_fingerprints()
+    total_score = 0.0
     for frag in fragments:
         canon = _canonicalize(frag)
         if canon is not None and canon in stock_set:
-            buyable += 1
-    return buyable / len(fragments)
+            total_score += 1.0
+        elif buyable_fps:
+            # Soft reward: partial credit for similarity to buyables
+            mol = Chem.MolFromSmiles(frag)
+            if mol is not None:
+                frag_fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+                max_sim = max(DataStructs.TanimotoSimilarity(frag_fp, bfp) for bfp in buyable_fps)
+                if max_sim > 0.6:
+                    total_score += (max_sim - 0.6) / 0.4
+    return total_score / len(fragments)
 
 
 def _check_atom_conservation(content: str, product_smiles: str) -> float:

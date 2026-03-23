@@ -9,6 +9,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
+from rdkit import Chem
+
 
 @dataclass
 class MCTSNode:
@@ -314,7 +316,8 @@ class MCTS:
         """Expansion phase: use policy to generate children for a node.
 
         Calls policy.predict_greedy() to get top-K reactant sets,
-        then creates child nodes for each reactant.
+        then creates child nodes for each reactant. Skips reactants
+        whose canonical SMILES match any ancestor to prevent cycles.
 
         Args:
             node: Node to expand.
@@ -324,6 +327,18 @@ class MCTS:
         """
         node.is_expanded = True
         all_new_children: list[MCTSNode] = []
+
+        # Collect ancestor SMILES to prevent cycles (A -> B -> A)
+        ancestors: set[str] = set()
+        current = node
+        while current is not None:
+            try:
+                mol = Chem.MolFromSmiles(current.smiles)
+                canon = Chem.MolToSmiles(mol) if mol else current.smiles
+            except Exception:
+                canon = current.smiles
+            ancestors.add(canon)
+            current = current.parent
 
         try:
             predictions = self.policy.predict_greedy(node.smiles, num_beams=self.top_k)
@@ -345,6 +360,15 @@ class MCTS:
             # Create a group of child nodes (one per reactant in this disconnection)
             group: list[MCTSNode] = []
             for reactant_smi in reactant_smiles_list:
+                # Cycle detection: skip if this reactant matches an ancestor
+                try:
+                    r_mol = Chem.MolFromSmiles(reactant_smi)
+                    r_canon = Chem.MolToSmiles(r_mol) if r_mol else reactant_smi
+                except Exception:
+                    r_canon = reactant_smi
+                if r_canon in ancestors:
+                    continue
+
                 child = MCTSNode(
                     smiles=reactant_smi,
                     depth=node.depth + 1,

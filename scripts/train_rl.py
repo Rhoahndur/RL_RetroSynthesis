@@ -50,6 +50,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint_dir", type=str, default="models/checkpoints")
     parser.add_argument("--baseline_decay", type=float, default=0.99)
     parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument(
+        "--num_samples",
+        type=int,
+        default=4,
+        help="Candidates per target for group-relative advantage (GRPO-style)",
+    )
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument(
         "--resume", type=str, default=None, help="Path to checkpoint to resume from"
@@ -242,6 +248,7 @@ def train(args: argparse.Namespace) -> None:
     print(f"  Learning rate:  {args.lr}")
     print(f"  Num steps:      {args.num_steps}")
     print(f"  Temperature:    {args.temperature}")
+    print(f"  Num samples:    {args.num_samples} per target (group-relative advantage)")
     print(f"  Baseline decay: {args.baseline_decay}")
     print(f"  Checkpoint dir: {args.checkpoint_dir}")
     print(f"  Checkpoint every: {args.checkpoint_every}")
@@ -262,38 +269,46 @@ def train(args: argparse.Namespace) -> None:
         valid_samples = 0
 
         for target in targets:
-            # Generate reactant predictions
-            reactants = policy.predict(target, num_candidates=1, temperature=args.temperature)
+            # Generate k candidate predictions per target
+            candidates = policy.predict(
+                target, num_candidates=args.num_samples, temperature=args.temperature
+            )
 
-            # Skip if no predictions
-            if not reactants:
+            if not candidates:
                 continue
 
-            # Split first candidate on '.' for multi-reactant reactions
-            reactant_list = reactants[0].split(".")
+            # Compute rewards for all candidates
+            sample_rewards = []
+            for candidate in candidates:
+                reactant_list = candidate.split(".")
+                r = reward_calc.combined_reward(target, reactant_list, stock)
+                sample_rewards.append(r)
 
-            # Compute reward
-            reward = reward_calc.combined_reward(target, reactant_list, stock)
+            if not sample_rewards:
+                continue
 
-            # Compute log probability (differentiable)
-            log_p = policy.log_prob(target, reactants[0])
+            # Group-relative advantage (GRPO-style):
+            # advantage_i = reward_i - mean(rewards in group)
+            group_mean = sum(sample_rewards) / len(sample_rewards)
 
-            # REINFORCE loss: -log_p * (reward - baseline)
-            loss = -log_p * (reward - baseline)
+            for candidate, r in zip(candidates, sample_rewards):
+                log_p = policy.log_prob(target, candidate)
+                advantage = r - group_mean
+                loss = -log_p * advantage
+                total_loss = total_loss + loss
+                valid_samples += 1
 
-            total_loss = total_loss + loss
-            valid_samples += 1
+            # Track statistics using best candidate from the group
+            best_reward = max(sample_rewards)
+            rewards_list.append(best_reward)
+            best_candidate = candidates[sample_rewards.index(best_reward)]
+            best_reactant_list = best_candidate.split(".")
 
-            # Track statistics
-            rewards_list.append(reward)
-
-            # Track validity: check if all reactants are valid SMILES
-            all_valid = all(reward_calc.validity_reward(r) > 0.5 for r in reactant_list)
+            all_valid = all(reward_calc.validity_reward(r) > 0.5 for r in best_reactant_list)
             if all_valid:
                 validity_count += 1
 
-            # Track stock hits: check if any reactant is buyable
-            any_in_stock = any(stock.is_buyable(r) for r in reactant_list)
+            any_in_stock = any(stock.is_buyable(r) for r in best_reactant_list)
             if any_in_stock:
                 stock_count += 1
 

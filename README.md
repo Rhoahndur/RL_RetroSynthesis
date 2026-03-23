@@ -113,18 +113,35 @@ python scripts/inference.py --target "CC(=O)Oc1ccccc1C(=O)O"
 python scripts/inference_pi.py --target "CC(=O)Oc1ccccc1C(=O)O" --model <deployment-id>
 ```
 
-## Reward Function
+## Reward Functions
 
-Retrosynthetic predictions are scored by a weighted combination of four components:
+### Local Pipeline (ReactionT5 + MCTS)
+
+Uses 4 weighted components via `env/Rewards.py`:
 
 | Component | Weight | Description |
 |---|---|---|
 | **Validity** | 0.30 | All output SMILES parse as valid RDKit molecules |
 | **Plausibility** | 0.20 | Molecules pass RDKit sanitization (no valency violations) |
 | **SA Score** | 0.20 | Reactants are simpler than the target (lower synthetic accessibility score) |
-| **Stock Match** | 0.30 | Reactants are found in the 246-molecule buyables list |
+| **Stock Match** | 0.30 | Reactants are found in the buyables list |
 
-The verifiers environment for Prime Intellect training adds a fifth component — **atom conservation** (0.15) — and a **format reward** (0.10) that penalizes non-SMILES text in the output.
+Atom conservation acts as a soft multiplier — poor conservation drags down the overall reward.
+
+### Prime Intellect Environment (GRPO)
+
+Uses 6 async reward functions via the `verifiers` rubric in `environments/retrosynthesis/`:
+
+| Component | Weight | Description |
+|---|---|---|
+| **Attempt** | 0.15 | Non-empty output with reasonable structure (prevents reward collapse) |
+| **Format** | 0.10 | Output contains only SMILES characters, no explanatory text |
+| **Validity** | 0.25 | Fraction of reactant fragments that parse as valid SMILES |
+| **SA Score** | 0.15 | Reactants are simpler than the target (sigmoid-mapped improvement) |
+| **Stock Match** | 0.25 | Fraction of reactants found in the 74-molecule inline buyables set |
+| **Atom Conservation** | 0.10 | Fraction of product atoms accounted for in combined reactants |
+
+All functions include reward floors (0.05-0.3 minimum for non-empty output) to prevent the model from collapsing to empty responses during GRPO training.
 
 ## Training
 
@@ -202,7 +219,7 @@ GitHub Actions runs lint and fast tests on every push/PR to `main`.
 - **RetroPolicy** (`models/policy.py`) — Wraps `sagawa/ReactionT5v2-retrosynthesis` (T5 seq2seq) with temperature sampling, log-probability computation, and checkpoint save/load for REINFORCE training.
 - **MCTS** (`env/MCTS.py`) — Full Monte Carlo Tree Search with UCT selection, policy-guided expansion, reward-based simulation, and backpropagation. Finds multi-step routes to buyable starting materials.
 - **ChemEnv** (`env/ChemEnv.py`) — Gym-style wrapper combining policy, rewards, and stock list into a step-based interface for episodic RL.
-- **Verifiers Environment** (`environments/retrosynthesis/`) — Self-contained `vf.SingleTurnEnv` package for Prime Intellect hosted RL training. Includes inline dataset (USPTO-50K + demo molecules), async RDKit reward rubric, and 200+ buyable SMILES.
+- **Verifiers Environment** (`environments/retrosynthesis/`) — Self-contained `vf.SingleTurnEnv` package for Prime Intellect hosted RL training. Loads USPTO-50K from HuggingFace Hub (`rhoahndur/retrosyn-targets`), falls back to 24 inline demo molecules. 6-component async RDKit reward rubric with 74 inline buyable SMILES.
 
 ## Tech Stack
 
@@ -216,6 +233,7 @@ GitHub Actions runs lint and fast tests on every push/PR to `main`.
 | Frontend | Streamlit + py3Dmol |
 | Inference API | OpenAI-compatible (Prime Intellect) |
 | CI/CD | GitHub Actions + ruff + pytest |
+| Deployment | HuggingFace Spaces (auto-deploy from GitHub) |
 | Linting | Ruff |
 | Pre-commit | ruff check + ruff format |
 

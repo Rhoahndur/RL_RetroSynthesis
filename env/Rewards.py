@@ -123,23 +123,31 @@ class RewardCalculator:
         return max(0.0, min(1.0, reward))
 
     def stock_reward(self, smiles: str, stock_list) -> float:
-        """Check if a molecule is in the buyables stock list.
+        """Score a molecule based on stock availability or similarity to buyables.
 
-        For a single SMILES, returns 1.0 if buyable, 0.0 if not.
-        Also handles lists of reactants by accepting a single SMILES string
-        (the combined_reward method handles averaging across reactants).
+        Returns 1.0 for exact matches. For non-matches, computes Morgan
+        fingerprint Tanimoto similarity to the nearest buyable molecule and
+        gives partial credit for similarity above 0.6 (linear scale to 1.0).
 
         Args:
             smiles: SMILES string to check.
-            stock_list: StockList instance with is_buyable() method.
+            stock_list: StockList instance with is_buyable() and
+                        nearest_similarity() methods.
 
         Returns:
-            1.0 if buyable, 0.0 if not.
+            Float in [0, 1]. 1.0 if buyable, partial credit if similar.
         """
         if not smiles or not isinstance(smiles, str):
             return 0.0
         try:
-            return 1.0 if stock_list.is_buyable(smiles) else 0.0
+            if stock_list.is_buyable(smiles):
+                return 1.0
+            # Soft reward: partial credit for molecules close to buyables
+            if hasattr(stock_list, "nearest_similarity"):
+                similarity = stock_list.nearest_similarity(smiles)
+                if similarity > 0.6:
+                    return (similarity - 0.6) / 0.4
+            return 0.0
         except Exception:
             return 0.0
 

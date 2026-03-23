@@ -11,7 +11,8 @@ graph TB
     end
 
     subgraph Inference["Inference Layer"]
-        INF["inference.py<br/>Load checkpoint + run search"]
+        INF["inference.py<br/>Local: ReactionT5 + MCTS"]
+        INF_PI["inference_pi.py<br/>PI: OpenAI API + reward scoring"]
         MCTS["MCTS Engine<br/>env/MCTS.py"]
     end
 
@@ -36,7 +37,7 @@ graph TB
     end
 
     subgraph Data["Data Layer"]
-        CSV["buyables.csv<br/>~200 common reagents"]
+        CSV["buyables.csv<br/>246 common reagents"]
         TDC["TDC / USPTO-50K<br/>Training targets"]
         TARGETS["training_targets.csv<br/>Diverse product SMILES"]
         CKPT_DIR["models/checkpoints/<br/>step_N_reward_R.pt"]
@@ -44,7 +45,8 @@ graph TB
 
     subgraph Infra["Infrastructure"]
         MAC["MacBook Air M3<br/>Local dev + testing"]
-        PI["Prime Intellect H100<br/>Training + Streamlit serving"]
+        PI["Prime Intellect<br/>GRPO RL Training (managed)"]
+        HFS["HuggingFace Spaces<br/>Streamlit deployment"]
     end
 
     %% User → Inference
@@ -236,10 +238,14 @@ graph BT
     POLICY --> TRAIN
     POLICY --> ENV
 
-    MCTS --> INF["inference.py"]
+    MCTS --> INF["inference.py<br/>(local)"]
     POLICY --> INF
 
+    REWARD --> INF_PI["inference_pi.py<br/>(PI API)"]
+    STOCK --> INF_PI
+
     INF --> APP["Streamlit App<br/>app/main.py"]
+    INF_PI --> APP
 ```
 
 ## Infrastructure Topology
@@ -248,21 +254,34 @@ graph BT
 graph LR
     subgraph Local["MacBook Air M3"]
         DEV["VS Code / Terminal"]
-        BROWSER["Browser<br/>localhost:8501"]
+        BROWSER["Browser"]
     end
 
-    subgraph PI["Prime Intellect Pod (H100)"]
-        GPU["NVIDIA H100 80GB"]
-        TRAIN_PROC["train_rl.py<br/>(GPU training)"]
-        STREAMLIT["Streamlit<br/>port 8501"]
-        CKPTS["checkpoints/"]
+    subgraph HFS["HuggingFace Spaces"]
+        ST_PROD["Streamlit App<br/>2 vCPU / 16GB RAM"]
+        RT5_PROD["ReactionT5v2<br/>(preloaded)"]
     end
 
-    DEV -->|"SSH + scp code"| PI
-    BROWSER -->|"SSH tunnel<br/>-L 8501:localhost:8501"| STREAMLIT
-    TRAIN_PROC --> GPU
-    TRAIN_PROC --> CKPTS
-    STREAMLIT -->|"loads best"| CKPTS
+    subgraph PI["Prime Intellect (Managed)"]
+        GRPO["GRPO Trainer"]
+        VLLM["vLLM Inference"]
+        ORCH["Orchestrator"]
+        VERENV["Verifiers Env<br/>rhoahndur/retrosynthesis"]
+    end
+
+    subgraph HFHub["HuggingFace Hub"]
+        DS["rhoahndur/retrosyn-targets<br/>USPTO-50K dataset"]
+        MODEL["sagawa/ReactionT5v2<br/>Pre-trained model"]
+    end
+
+    DEV -->|"git push"| HFS
+    BROWSER --> ST_PROD
+    ST_PROD --> RT5_PROD
+    DEV -->|"prime rl run"| PI
+    ORCH --> VLLM
+    ORCH --> GRPO
+    VERENV -->|"loads dataset"| DS
+    HFS -->|"preloads model"| MODEL
 ```
 
 ## File Map

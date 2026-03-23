@@ -8,6 +8,7 @@ import os
 from typing import Optional
 
 from rdkit import Chem
+from rdkit.Chem import AllChem, DataStructs
 
 DEFAULT_STOCK_PATH = os.path.join(os.path.dirname(__file__), "buyables.csv")
 
@@ -23,6 +24,7 @@ class StockList:
 
     def __init__(self) -> None:
         self._canonical_smiles: set[str] = set()
+        self._fingerprints: list = []
         self._loaded = False
 
     def load(self, csv_path: Optional[str] = None) -> "StockList":
@@ -58,6 +60,15 @@ class StockList:
                     self._canonical_smiles.add(canon)
 
         self._loaded = True
+
+        # Precompute Morgan fingerprints for similarity lookups
+        self._fingerprints = []
+        for smi in self._canonical_smiles:
+            mol = Chem.MolFromSmiles(smi)
+            if mol is not None:
+                fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+                self._fingerprints.append(fp)
+
         return self
 
     def is_buyable(self, smiles: str) -> bool:
@@ -95,6 +106,33 @@ class StockList:
             return Chem.MolToSmiles(mol)
         except Exception:
             return None
+
+    def nearest_similarity(self, smiles: str) -> float:
+        """Find the max Tanimoto similarity to any buyable molecule.
+
+        Uses Morgan fingerprints (radius=2, 2048 bits).
+
+        Args:
+            smiles: SMILES string to compare.
+
+        Returns:
+            Max Tanimoto similarity in [0, 1]. Returns 0.0 for invalid SMILES.
+        """
+        if not self._fingerprints:
+            return 0.0
+        try:
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None:
+                return 0.0
+            fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+            max_sim = 0.0
+            for stock_fp in self._fingerprints:
+                sim = DataStructs.TanimotoSimilarity(fp, stock_fp)
+                if sim > max_sim:
+                    max_sim = sim
+            return max_sim
+        except Exception:
+            return 0.0
 
     def __len__(self) -> int:
         """Return the number of molecules in the stock list."""
