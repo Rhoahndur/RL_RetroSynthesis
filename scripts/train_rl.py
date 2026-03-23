@@ -28,6 +28,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 import torch
+from rdkit import Chem
+from rdkit.Chem import rdMolDescriptors
 
 from data.stock.loader import StockList
 from env.Rewards import RewardCalculator
@@ -267,6 +269,10 @@ def train(args: argparse.Namespace) -> None:
         validity_count = 0
         stock_count = 0
         valid_samples = 0
+        total_atom_count = 0
+        atom_count_n = 0
+        batch_canonical_smiles = set()
+        batch_total_smiles = 0
 
         for target in targets:
             # Generate k candidate predictions per target
@@ -312,6 +318,15 @@ def train(args: argparse.Namespace) -> None:
             if any_in_stock:
                 stock_count += 1
 
+            # Track atom counts and diversity
+            for frag in best_reactant_list:
+                mol = Chem.MolFromSmiles(frag)
+                if mol is not None:
+                    total_atom_count += rdMolDescriptors.CalcNumHeavyAtoms(mol)
+                    atom_count_n += 1
+                    batch_canonical_smiles.add(Chem.MolToSmiles(mol))
+                    batch_total_smiles += 1
+
         # Handle edge case: entire batch produced no valid predictions
         if valid_samples == 0:
             if step % 10 == 0:
@@ -338,6 +353,10 @@ def train(args: argparse.Namespace) -> None:
         # Compute rates
         validity_rate = validity_count / len(targets)
         stock_rate = stock_count / len(targets)
+        avg_atoms = total_atom_count / atom_count_n if atom_count_n > 0 else 0.0
+        unique_ratio = (
+            len(batch_canonical_smiles) / batch_total_smiles if batch_total_smiles > 0 else 0.0
+        )
 
         step_time = time.time() - step_start
 
@@ -348,6 +367,8 @@ def train(args: argparse.Namespace) -> None:
                 f"reward={mean_reward:.4f} | "
                 f"validity={validity_rate:.2%} | "
                 f"stock={stock_rate:.2%} | "
+                f"atoms={avg_atoms:.1f} | "
+                f"diversity={unique_ratio:.2f} | "
                 f"loss={avg_loss.item():.4f} | "
                 f"baseline={baseline:.4f} | "
                 f"time={step_time:.1f}s"
