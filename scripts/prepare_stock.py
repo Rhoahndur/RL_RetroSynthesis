@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import json
 import sys
 import urllib.request
 from pathlib import Path
@@ -39,10 +40,7 @@ OUT_ENV = ROOT / "environments" / "retrosynthesis" / "data" / "buyables.smi.gz"
 # ---------------------------------------------------------------------------
 # Public download URLs (tried in order)
 # ---------------------------------------------------------------------------
-AIZYNTHFINDER_URL = (
-    "https://raw.githubusercontent.com/MolecularAI/aizynthfinder/"
-    "master/aizynthfinder/data/stock_inchi_keys.csv"
-)
+ASKCOS_BUYABLES_URL = "https://github.com/ASKCOS/askcos-data/raw/main/buyables/buyables.json.gz"
 
 
 # ---------------------------------------------------------------------------
@@ -79,26 +77,29 @@ def load_csv(path: Path) -> set[str]:
     return smiles
 
 
-def try_download_aizynthfinder() -> set[str] | None:
-    """Try downloading AiZynthFinder stock InChI-keys and converting."""
-    print("Attempting AiZynthFinder stock download...")
+def try_download_askcos() -> set[str] | None:
+    """Download ASKCOS buyables (~280k compounds) from GitHub."""
+    print("Attempting ASKCOS buyables download...")
     try:
-        req = urllib.request.Request(AIZYNTHFINDER_URL, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = resp.read().decode("utf-8")
-        # This file contains InChI keys, not SMILES -- not directly useful
-        # unless we can resolve them. Check if content looks like SMILES instead.
-        lines = data.strip().split("\n")
+        req = urllib.request.Request(ASKCOS_BUYABLES_URL, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            raw = resp.read()
+        data = gzip.decompress(raw)
+        entries = json.loads(data)
+        print(f"  Downloaded {len(entries)} entries from ASKCOS")
         smiles: set[str] = set()
-        for line in lines[1:]:  # skip header
-            parts = line.strip().split(",")
-            for part in parts:
-                part = part.strip().strip('"')
-                canon = canonicalize(part)
-                if canon:
-                    smiles.add(canon)
-        if len(smiles) > 100:
-            print(f"  Downloaded {len(smiles)} SMILES from AiZynthFinder")
+        invalid = 0
+        for entry in entries:
+            smi = entry.get("smiles", "")
+            if not smi:
+                continue
+            canon = canonicalize(smi)
+            if canon:
+                smiles.add(canon)
+            else:
+                invalid += 1
+        print(f"  Canonicalized {len(smiles)} valid SMILES ({invalid} invalid/skipped)")
+        if len(smiles) > 1000:
             return smiles
         print(f"  Only got {len(smiles)} valid SMILES -- not enough, skipping")
         return None
@@ -641,7 +642,7 @@ def main() -> None:
 
     # Step 2: Try external download
     print("\n[2/3] Trying external downloads ...")
-    downloaded = try_download_aizynthfinder()
+    downloaded = try_download_askcos()
     if downloaded:
         all_smiles |= downloaded
         print(f"  Running total: {len(all_smiles)}")
