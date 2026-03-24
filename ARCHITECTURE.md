@@ -38,11 +38,13 @@ graph TB
     end
 
     subgraph Chem["Chemistry Engine"]
-        RDKIT["RDKit<br/>Validity · Sanitization · SAscore<br/>Mol rendering · Canonicalization<br/>Morgan FP · Tanimoto similarity"]
+        RDKIT["RDKit<br/>Validity · Sanitization<br/>Mol rendering · Canonicalization<br/>Morgan FP · Tanimoto similarity"]
+        SASCORE["SA Scorer<br/>lib/sascorer (vendored)<br/>Ertl-Schuffenhauer algorithm"]
     end
 
     subgraph Data["Data Layer"]
         CSV["buyables.csv<br/>246 common reagents"]
+        SMIGZ["buyables_full.smi.gz<br/>~204k ASKCOS compounds"]
         TDC["TDC / USPTO-50K<br/>Training targets"]
         TARGETS["training_targets.csv<br/>Diverse product SMILES"]
         CKPT_DIR["models/checkpoints/<br/>step_N_reward_R.pt"]
@@ -85,10 +87,12 @@ graph TB
 
     %% Core → Foundation
     POLICY -->|"wraps"| RT5
-    REWARD -->|"validity + SAscore"| RDKIT
+    REWARD -->|"validity"| RDKIT
+    REWARD -->|"SAscore"| SASCORE
     STOCK -->|"canonicalize + fingerprints"| RDKIT
     RDK_DRAW -->|"MolToImage"| RDKIT
     STOCK -->|"loads"| CSV
+    STOCK -->|"loads"| SMIGZ
 
     %% Checkpoints
     CKPT -->|"write"| CKPT_DIR
@@ -212,12 +216,12 @@ graph LR
     subgraph Rewards["Reward Components (weighted)"]
         V["Validity<br/>RDKit parse<br/>weight: 0.3"]
         P["Plausibility<br/>RDKit sanitize<br/>weight: 0.2"]
-        SA["SAscore Δ<br/>simpler = better<br/>weight: 0.2"]
+        SA["SAscore Δ<br/>Ertl-Schuffenhauer<br/>simpler = better<br/>weight: 0.2"]
         BUY["Stock Match<br/>exact + Tanimoto ≥ 0.6<br/>weight: 0.3"]
     end
 
     subgraph Gate["Soft Gate (multiplier)"]
-        ATOM["Atom Conservation<br/>product atoms covered?<br/>× (0.5 + 0.5 × ratio)"]
+        ATOM["Atom Conservation<br/>bidirectional balance<br/>byproduct-aware (H2O, CO2, ...)<br/>× (0.5 + 0.5 × ratio)"]
     end
 
     subgraph Output
@@ -245,6 +249,7 @@ graph LR
 graph BT
     RDKIT["RDKit"] --> STOCK["StockList<br/>data/stock/loader.py"]
     RDKIT --> REWARD["RewardCalculator<br/>env/Rewards.py"]
+    SASCORER["lib/sascorer<br/>Ertl-Schuffenhauer"] --> REWARD
     HF["HuggingFace<br/>ReactionT5v2"] --> POLICY["RetroPolicy<br/>models/policy.py"]
 
     STOCK --> REWARD
@@ -301,7 +306,7 @@ graph LR
         MODEL["sagawa/ReactionT5v2<br/>Pre-trained model"]
     end
 
-    DEV -->|"git push"| HFS
+    DEV -->|"git push → sync-to-hf"| HFS
     BROWSER --> ST_PROD
     ST_PROD --> RT5_PROD
     DEV -->|"prime rl run"| PI
@@ -331,8 +336,15 @@ graph TD
             VTARGETS["validation_targets.csv"]
         end
         subgraph stock["stock/"]
-            BUY_CSV["buyables.csv"]
+            BUY_CSV["buyables.csv (246)"]
+            BUY_GZ["buyables_full.smi.gz (~204k)"]
             LOADER["loader.py → StockList"]
+        end
+    end
+
+    subgraph lib["lib/"]
+        subgraph sascorer_lib["sascorer/"]
+            SASCORER_F["sascorer.py + fpscores.pkl.gz"]
         end
     end
 
@@ -359,6 +371,7 @@ graph TD
         EVAL_MC_F["eval_mcts.py"]
         PREP_F["prepare_data.py"]
         PREP_PI_F["prepare_pi_dataset.py"]
+        PREP_STOCK_F["prepare_stock.py"]
         SETUP_F["setup_prime.sh"]
     end
 
@@ -366,7 +379,7 @@ graph TD
         MAIN_F["main.py (Streamlit)"]
     end
 
-    subgraph tests["tests/ (95 tests)"]
+    subgraph tests["tests/ (100 tests)"]
         T_STOCK["test_stock_list.py"]
         T_REWARDS["test_rewards.py"]
         T_MCTS["test_mcts.py"]
