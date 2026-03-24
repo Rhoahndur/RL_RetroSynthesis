@@ -8,3 +8,4 @@ stmol>=0.0.9
 numpy
 pandas
 openai>=1.0.0
+llama-cpp-python>=0.2.0
