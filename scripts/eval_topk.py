@@ -127,8 +127,9 @@ def load_eval_dataset(dataset_name: str, num_examples: int) -> list:
             rng = random.Random(42)
             rng.shuffle(rows)
             return rows[:num_examples]
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"WARNING: Failed to load HF dataset '{dataset_name}': {e}")
+        print("Falling back to built-in evaluation reactions.")
 
     return FALLBACK_REACTIONS[:num_examples]
 
