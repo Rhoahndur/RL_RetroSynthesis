@@ -40,5 +40,10 @@ ignore = [
     "B905",   # zip() strict= — not supported in Python 3.9 (system Python)
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Vendored third-party code (BSD license) — don't modify
+"lib/sascorer/sascorer.py" = ["SIM115", "B007", "UP031"]
+"environments/retrosynthesis/sascorer.py" = ["SIM115", "B007", "UP031"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["data", "env", "models", "scripts", "app"]
