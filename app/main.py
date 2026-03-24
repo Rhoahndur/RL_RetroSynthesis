@@ -528,9 +528,10 @@ def main():
     # ---- Sidebar ----
     st.sidebar.title("Configuration")
 
-    backends = ["Local Model (ReactionT5)"]
+    backends = []
     if HF_AVAILABLE:
-        backends.append("HuggingFace Inference API")
+        backends.append("RL Model (Qwen3-4B)")
+    backends.append("Local Model (ReactionT5)")
     if PI_AVAILABLE:
         backends.append("Prime Intellect API")
 
@@ -543,15 +544,11 @@ def main():
 
     pi_api_key = ""
     pi_model_id = ""
-    hf_model_id = ""
-    if backend == "HuggingFace Inference API":
-        hf_model_id = st.sidebar.text_input(
-            "Model ID",
-            value="rhoahndur/retrosynthesis-qwen3-4b",
-            key="hf_model_id",
+    if backend == "RL Model (Qwen3-4B)":
+        st.sidebar.caption(
+            "RL-trained Qwen3-4B (quantized, CPU). Slower (~15-30s) but uses your trained model."
         )
-        st.sidebar.caption("Uses the free HF Serverless Inference API (rate-limited).")
-        st.sidebar.success("Ready: HuggingFace Inference API")
+        st.sidebar.success("Ready: RL Model (GGUF)")
     elif backend == "Prime Intellect API":
         pi_api_key = st.sidebar.text_input(
             "API Key",
@@ -616,13 +613,11 @@ def main():
         else:
             with st.spinner("Searching for synthesis routes..."):
                 try:
-                    if backend == "HuggingFace Inference API":
+                    if backend == "RL Model (Qwen3-4B)":
                         result = run_inference_hf(
                             smiles,
                             reward_calc,
                             stock_list,
-                            model_id=hf_model_id,
-                            token=os.environ.get("HF_TOKEN", None),
                         )
                     elif backend == "Prime Intellect API":
                         client = create_pi_client(api_key=pi_api_key)
