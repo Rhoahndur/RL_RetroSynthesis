@@ -6,9 +6,11 @@ dist/
 build/
 uv.lock
 
-# Model checkpoints (large binaries, reproduced via training)
+# Model checkpoints and adapters (large binaries)
 models/checkpoints/*.pt
 models/checkpoints/*.pth
+models/lora_adapter/
+models/merged/
 
 # Downloaded/generated data (reproduced via prepare_data.py)
 data/raw/
