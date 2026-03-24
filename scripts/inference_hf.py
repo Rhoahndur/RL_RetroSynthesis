@@ -1,7 +1,7 @@
-"""HuggingFace Inference API client for retrosynthesis.
+"""GGUF CPU inference client for retrosynthesis.
 
-Calls a PEFT LoRA model hosted on HuggingFace Hub via the free Serverless
-Inference API, then scores results with RDKit rewards.
+Loads the quantized Qwen3-4B GGUF model via llama-cpp-python and runs
+inference on CPU. Slow (~10-20s) but free — no GPU or API key needed.
 
 Usage:
     # As module (from Streamlit):
@@ -14,56 +14,69 @@ Usage:
 
 import argparse
 import json
-import os
+import re
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from huggingface_hub import InferenceClient
+from llama_cpp import Llama
 from rdkit import Chem
 
 from data.stock.loader import StockList
 from env.Rewards import RewardCalculator
 from scripts.inference import mol_to_base64_image
 
-DEFAULT_MODEL_ID = "rhoahndur/retrosynthesis-qwen3-4b"
+GGUF_REPO = "rhoahndur/retrosynthesis-qwen3-4b-gguf"
+GGUF_FILE = "retrosynthesis-qwen3-4b-Q4_K_M.gguf"
 
-SYSTEM_PROMPT = """You are a retrosynthesis expert. Given a target molecule as a SMILES string,
-predict the reactant molecules that can be combined to synthesize the target.
+SYSTEM_PROMPT = (
+    "You are a retrosynthesis expert. Given a target molecule as a SMILES string, "
+    "predict the reactant molecules that can be combined to synthesize the target.\n\n"
+    "Rules:\n"
+    "- Output ONLY the reactant SMILES strings separated by '.'\n"
+    "- Do NOT include any explanation, reasoning, or extra text\n"
+    "- Each reactant must be a valid SMILES string\n"
+    "- Prefer simpler, commercially available starting materials\n"
+    "- Ensure atom conservation: reactant atoms should cover the product atoms\n\n"
+    "Example:\n"
+    "Input: CC(=O)Oc1ccccc1C(=O)O\n"
+    "Output: OC(=O)c1ccccc1O.CC(=O)OC(C)=O"
+)
 
-Rules:
-- Output ONLY the reactant SMILES strings separated by '.'
-- Do NOT include any explanation, reasoning, or extra text
-- Each reactant must be a valid SMILES string
-- Prefer simpler, commercially available starting materials
-- Ensure atom conservation: reactant atoms should cover the product atoms
+_llm: Llama | None = None
 
-Example:
-Input: CC(=O)Oc1ccccc1C(=O)O
-Output: OC(=O)c1ccccc1O.CC(=O)OC(C)=O"""
+
+def _get_llm() -> Llama:
+    """Lazy-load the GGUF model (downloads ~2.5GB on first call)."""
+    global _llm
+    if _llm is None:
+        print(f"Loading GGUF model from {GGUF_REPO}...")
+        _llm = Llama.from_pretrained(
+            repo_id=GGUF_REPO,
+            filename=GGUF_FILE,
+            n_ctx=512,
+            n_threads=4,
+            verbose=False,
+        )
+        print("GGUF model loaded.")
+    return _llm
 
 
 def run_inference_hf(
     target_smiles: str,
     reward_calc: RewardCalculator,
     stock_list: StockList,
-    model_id: str = DEFAULT_MODEL_ID,
-    token: str | None = None,
-    system_prompt: str = SYSTEM_PROMPT,
     n_candidates: int = 3,
 ) -> dict:
-    """Run retrosynthetic inference via HuggingFace Inference API.
+    """Run retrosynthetic inference via quantized GGUF model on CPU.
 
     Args:
         target_smiles: SMILES string of the target molecule.
         reward_calc: RewardCalculator instance for scoring predictions.
         stock_list: StockList instance (pre-loaded) for buyability checks.
-        model_id: HuggingFace model/adapter repo ID.
-        token: HF API token. Defaults to HF_TOKEN env var.
-        system_prompt: System prompt for the chat model.
-        n_candidates: Number of candidate completions to request.
+        n_candidates: Number of candidate completions to generate.
 
     Returns:
         Dict matching the standard result format.
@@ -79,28 +92,40 @@ def run_inference_hf(
             "error": f"Invalid SMILES: {target_smiles}",
         }
 
-    if token is None:
-        token = os.environ.get("HF_TOKEN", None)
-    client = InferenceClient(model=model_id, token=token)
-
     start_time = time.time()
-    scored_candidates: list[tuple[float, list[str]]] = []
+    try:
+        llm = _get_llm()
+    except Exception as e:
+        return {
+            "target": target_smiles,
+            "routes": [],
+            "best_score": 0.0,
+            "stats": {
+                "simulations": 0,
+                "time_seconds": time.time() - start_time,
+                "routes_found": 0,
+            },
+            "molecules": [],
+            "error": f"Model load error: {e}",
+        }
 
-    # HF Inference API doesn't support n>1 in one call, so loop
+    scored_candidates: list[tuple[float, list[str]]] = []
     for _ in range(n_candidates):
         try:
-            response = client.chat_completion(
+            resp = llm.create_chat_completion(
                 messages=[
-                    {"role": "system", "content": system_prompt},
+                    {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": f"Predict the reactants for: {target_smiles}"},
                 ],
                 max_tokens=256,
                 temperature=0.7,
+                top_p=0.9,
             )
-            raw_text = response.choices[0].message.content
+            raw_text = resp["choices"][0]["message"]["content"]
             if not raw_text:
                 continue
-            raw_text = raw_text.strip()
+            # Strip thinking tags if present
+            raw_text = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
             if not raw_text:
                 continue
 
@@ -110,16 +135,8 @@ def run_inference_hf(
 
             reward = reward_calc.combined_reward(target_smiles, reactants, stock_list)
             scored_candidates.append((reward, reactants))
-        except Exception as e:
-            elapsed = time.time() - start_time
-            return {
-                "target": target_smiles,
-                "routes": [],
-                "best_score": 0.0,
-                "stats": {"simulations": 0, "time_seconds": elapsed, "routes_found": 0},
-                "molecules": [],
-                "error": f"HF Inference API error: {e}",
-            }
+        except Exception:
+            continue
 
     elapsed = time.time() - start_time
 
@@ -180,17 +197,13 @@ def run_inference_hf(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="HuggingFace retrosynthesis inference")
+    parser = argparse.ArgumentParser(description="GGUF CPU retrosynthesis inference")
     parser.add_argument("--target", required=True, help="Target SMILES string")
-    parser.add_argument("--model", default=DEFAULT_MODEL_ID, help="HF model/adapter repo ID")
-    parser.add_argument("--token", default=None, help="HF token (or set HF_TOKEN)")
     parser.add_argument("--n", type=int, default=3, help="Number of candidates")
     args = parser.parse_args()
 
     reward_calc = RewardCalculator()
     stock = StockList()
     stock.load()
-    result = run_inference_hf(
-        args.target, reward_calc, stock, model_id=args.model, token=args.token, n_candidates=args.n
-    )
+    result = run_inference_hf(args.target, reward_calc, stock, n_candidates=args.n)
     print(json.dumps(result, indent=2, default=str))
