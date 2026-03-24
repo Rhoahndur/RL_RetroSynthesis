@@ -1,26 +1,27 @@
-"""GGUF CPU inference client for retrosynthesis.
+"""GGUF CPU inference for retrosynthesis via pre-built llama.cpp binary.
 
-Loads the quantized Qwen3-4B GGUF model via llama-cpp-python and runs
-inference on CPU. Slow (~10-20s) but free — no GPU or API key needed.
+Downloads the llama.cpp CLI binary and GGUF model from HuggingFace Hub,
+runs inference as a subprocess. No compilation, no GPU, no API key.
 
 Usage:
-    # As module (from Streamlit):
     from scripts.inference_hf import run_inference_hf
     result = run_inference_hf("CC(=O)Oc1ccccc1C(=O)O", reward_calc, stock)
-
-    # As CLI:
-    python scripts/inference_hf.py --target "CC(=O)Oc1ccccc1C(=O)O"
 """
 
-import argparse
 import json
+import os
 import re
+import stat
+import subprocess
 import sys
+import tarfile
+import tempfile
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from huggingface_hub import hf_hub_download
 from rdkit import Chem
 
 from data.stock.loader import StockList
@@ -29,6 +30,11 @@ from scripts.inference import mol_to_base64_image
 
 GGUF_REPO = "rhoahndur/retrosynthesis-qwen3-4b-gguf"
 GGUF_FILE = "retrosynthesis-qwen3-4b-Q4_K_M.gguf"
+LLAMA_RELEASE = "b5560"
+LLAMA_TAR = f"llama-{LLAMA_RELEASE}-bin-ubuntu-x64.tar.gz"
+LLAMA_URL = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_RELEASE}/{LLAMA_TAR}"
+
+CACHE_DIR = Path.home() / ".cache" / "retrosyn-llama"
 
 SYSTEM_PROMPT = (
     "You are a retrosynthesis expert. Given a target molecule as a SMILES string, "
@@ -37,32 +43,61 @@ SYSTEM_PROMPT = (
     "- Output ONLY the reactant SMILES strings separated by '.'\n"
     "- Do NOT include any explanation, reasoning, or extra text\n"
     "- Each reactant must be a valid SMILES string\n"
-    "- Prefer simpler, commercially available starting materials\n"
-    "- Ensure atom conservation: reactant atoms should cover the product atoms\n\n"
+    "- Prefer simpler, commercially available starting materials\n\n"
     "Example:\n"
     "Input: CC(=O)Oc1ccccc1C(=O)O\n"
     "Output: OC(=O)c1ccccc1O.CC(=O)OC(C)=O"
 )
 
-_llm = None
+
+def _get_llama_binary() -> Path:
+    """Download and extract pre-built llama-cli binary."""
+    binary = CACHE_DIR / "llama-cli"
+    if binary.exists():
+        return binary
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Downloading llama.cpp binary ({LLAMA_RELEASE})...")
+    tar_path = CACHE_DIR / LLAMA_TAR
+    subprocess.check_call(["curl", "-L", "-o", str(tar_path), LLAMA_URL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with tarfile.open(tar_path) as tar:
+        for member in tar.getmembers():
+            if member.name.endswith("/llama-cli"):
+                member.name = "llama-cli"
+                tar.extract(member, CACHE_DIR)
+                break
+    tar_path.unlink()
+    binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
+    print(f"llama-cli ready at {binary}")
+    return binary
 
 
-def _get_llm():
-    """Lazy-load the GGUF model (downloads ~2.5GB on first call)."""
-    global _llm
-    if _llm is None:
-        from llama_cpp import Llama
+def _get_model_path() -> Path:
+    """Download GGUF model from HuggingFace Hub."""
+    print(f"Ensuring GGUF model is downloaded...")
+    path = hf_hub_download(repo_id=GGUF_REPO, filename=GGUF_FILE)
+    print(f"Model at {path}")
+    return Path(path)
 
-        print(f"Loading GGUF model from {GGUF_REPO}...")
-        _llm = Llama.from_pretrained(
-            repo_id=GGUF_REPO,
-            filename=GGUF_FILE,
-            n_ctx=512,
-            n_threads=4,
-            verbose=False,
-        )
-        print("GGUF model loaded.")
-    return _llm
+
+def _run_llama(binary: Path, model_path: Path, prompt: str, temperature: float = 0.7) -> str:
+    """Run a single inference call via llama-cli subprocess."""
+    result = subprocess.run(
+        [
+            str(binary),
+            "-m", str(model_path),
+            "-c", "512",
+            "-n", "256",
+            "--temp", str(temperature),
+            "--top-p", "0.9",
+            "-p", prompt,
+            "--no-display-prompt",
+            "-t", "2",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    return result.stdout.strip()
 
 
 def run_inference_hf(
@@ -71,17 +106,7 @@ def run_inference_hf(
     stock_list: StockList,
     n_candidates: int = 3,
 ) -> dict:
-    """Run retrosynthetic inference via quantized GGUF model on CPU.
-
-    Args:
-        target_smiles: SMILES string of the target molecule.
-        reward_calc: RewardCalculator instance for scoring predictions.
-        stock_list: StockList instance (pre-loaded) for buyability checks.
-        n_candidates: Number of candidate completions to generate.
-
-    Returns:
-        Dict matching the standard result format.
-    """
+    """Run retrosynthetic inference via quantized GGUF model on CPU."""
     mol = Chem.MolFromSmiles(target_smiles)
     if mol is None:
         return {
@@ -95,45 +120,36 @@ def run_inference_hf(
 
     start_time = time.time()
     try:
-        llm = _get_llm()
+        binary = _get_llama_binary()
+        model_path = _get_model_path()
     except Exception as e:
         return {
             "target": target_smiles,
             "routes": [],
             "best_score": 0.0,
-            "stats": {
-                "simulations": 0,
-                "time_seconds": time.time() - start_time,
-                "routes_found": 0,
-            },
+            "stats": {"simulations": 0, "time_seconds": time.time() - start_time, "routes_found": 0},
             "molecules": [],
-            "error": f"Model load error: {e}",
+            "error": f"Setup error: {e}",
         }
+
+    prompt = (
+        f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
+        f"<|im_start|>user\nPredict the reactants for: {target_smiles}<|im_end|>\n"
+        f"<|im_start|>assistant\n"
+    )
 
     scored_candidates: list[tuple[float, list[str]]] = []
     for _ in range(n_candidates):
         try:
-            resp = llm.create_chat_completion(
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"Predict the reactants for: {target_smiles}"},
-                ],
-                max_tokens=256,
-                temperature=0.7,
-                top_p=0.9,
-            )
-            raw_text = resp["choices"][0]["message"]["content"]
-            if not raw_text:
+            raw = _run_llama(binary, model_path, prompt)
+            # Strip thinking tags and clean up
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+            raw = re.sub(r"<\|im_end\|>.*", "", raw).strip()
+            if not raw:
                 continue
-            # Strip thinking tags if present
-            raw_text = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
-            if not raw_text:
-                continue
-
-            reactants = [r.strip() for r in raw_text.split(".") if r.strip()]
+            reactants = [r.strip() for r in raw.split(".") if r.strip()]
             if not reactants:
                 continue
-
             reward = reward_calc.combined_reward(target_smiles, reactants, stock_list)
             scored_candidates.append((reward, reactants))
         except Exception:
@@ -141,11 +157,9 @@ def run_inference_hf(
 
     elapsed = time.time() - start_time
 
-    # Rank by reward descending
     scored_candidates.sort(key=lambda x: x[0], reverse=True)
     top_candidates = scored_candidates[:3]
 
-    # Build route trees
     routes = []
     for reward, reactants in top_candidates:
         children = []
@@ -160,7 +174,6 @@ def run_inference_hf(
 
     best_score = routes[0]["score"] if routes else 0.0
 
-    # Collect unique molecules
     seen_smiles: set[str] = set()
     all_smiles_ordered: list[str] = []
     for route in routes:
@@ -198,6 +211,8 @@ def run_inference_hf(
 
 
 if __name__ == "__main__":
+    import argparse
+
     parser = argparse.ArgumentParser(description="GGUF CPU retrosynthesis inference")
     parser.add_argument("--target", required=True, help="Target SMILES string")
     parser.add_argument("--n", type=int, default=3, help="Number of candidates")
