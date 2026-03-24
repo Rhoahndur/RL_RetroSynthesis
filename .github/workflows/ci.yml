@@ -30,3 +30,37 @@ jobs:
           pip install pytest
       - name: Run tests (fast only)
         run: python -m pytest tests/ -m "not slow" -v --tb=short
+
+  verify-dataset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install datasets
+        run: pip install datasets
+      - name: Verify HF dataset is accessible
+        run: |
+          python -c "
+          from datasets import load_dataset
+          ds = load_dataset('rhoahndur/retrosyn-targets', split='train[:5]')
+          assert len(ds) == 5, f'Expected 5 rows, got {len(ds)}'
+          print(f'Dataset verified: {len(ds)} rows loaded successfully')
+          "
+
+  eval-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Smoke test eval_topk
+        run: python scripts/eval_topk.py --mock --num_examples 2 --top_k 3
+      - name: Smoke test eval_mcts
+        run: python scripts/eval_mcts.py --mock --num_molecules 2 --max_simulations 5 --time_budget 5
