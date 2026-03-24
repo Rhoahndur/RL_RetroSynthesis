@@ -611,7 +611,7 @@ def build_rubric() -> vf.Rubric:
             return 0.0
 
     # Build and return the rubric
-    # Weights: attempt(0.15) + format(0.1) + validity(0.25) + sascore(0.15) + stock(0.25) + atoms(0.1) = 1.0
+    # Weights: attempt(0.10) + format(0.1) + validity(0.25) + sascore(0.15) + stock(0.25) + atoms(0.15) = 1.0
     return vf.Rubric(
         funcs=[
             attempt_reward,
