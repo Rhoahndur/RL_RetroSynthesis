@@ -21,7 +21,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from llama_cpp import Llama
 from rdkit import Chem
 
 from data.stock.loader import StockList
@@ -45,13 +44,15 @@ SYSTEM_PROMPT = (
     "Output: OC(=O)c1ccccc1O.CC(=O)OC(C)=O"
 )
 
-_llm: Llama | None = None
+_llm = None
 
 
-def _get_llm() -> Llama:
+def _get_llm():
     """Lazy-load the GGUF model (downloads ~2.5GB on first call)."""
     global _llm
     if _llm is None:
+        from llama_cpp import Llama
+
         print(f"Loading GGUF model from {GGUF_REPO}...")
         _llm = Llama.from_pretrained(
             repo_id=GGUF_REPO,

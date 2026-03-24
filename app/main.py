@@ -36,7 +36,7 @@ try:
     from scripts.inference_hf import run_inference_hf
 
     HF_AVAILABLE = True
-except ImportError:
+except Exception:
     HF_AVAILABLE = False
 
 # Preset demo molecules
