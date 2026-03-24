@@ -12,7 +12,9 @@ import gzip
 import os
 
 from rdkit import Chem
-from rdkit.Chem import AllChem, DataStructs
+from rdkit.Chem import DataStructs, rdFingerprintGenerator
+
+_MORGAN_GEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
 
 DEFAULT_STOCK_PATH = os.path.join(os.path.dirname(__file__), "buyables.csv")
 
@@ -99,7 +101,7 @@ class StockList:
         for smi in self._canonical_smiles:
             mol = Chem.MolFromSmiles(smi)
             if mol is not None:
-                fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+                fp = _MORGAN_GEN.GetFingerprint(mol)
                 self._fingerprints.append(fp)
 
     def is_buyable(self, smiles: str) -> bool:
@@ -155,7 +157,7 @@ class StockList:
             mol = Chem.MolFromSmiles(smiles)
             if mol is None:
                 return 0.0
-            fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+            fp = _MORGAN_GEN.GetFingerprint(mol)
             similarities = DataStructs.BulkTanimotoSimilarity(fp, self._fingerprints)
             return max(similarities) if similarities else 0.0
         except Exception:
