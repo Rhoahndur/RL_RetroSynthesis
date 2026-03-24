@@ -39,11 +39,13 @@ def test_canonicalize_reaction_none():
 
 
 def test_compute_sascore_bucket_easy():
-    assert compute_sascore_bucket("C") == "easy"
+    # Ethanol: real SA score ~2.0 → easy bucket (≤3.0)
+    assert compute_sascore_bucket("CCO") == "easy"
 
 
 def test_compute_sascore_bucket_medium_or_hard():
-    bucket = compute_sascore_bucket("CC(C)Cc1ccc(C(C)C(=O)O)cc1")
+    # Testosterone: real SA score ~4.0 → medium bucket (3.0-5.0)
+    bucket = compute_sascore_bucket("CC12CCC3C(CCC4CC(=O)CCC43C)C1CCC2O")
     assert bucket in ("medium", "hard")
 
 

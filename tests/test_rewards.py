@@ -94,16 +94,35 @@ def test_stock_reward_not_buyable(reward_calc, stock_list):
 
 
 def test_atom_conservation_perfect(reward_calc):
+    """Aspirin synthesis: excess atoms form AcOH (known byproduct), score high."""
     reward = reward_calc.atom_conservation_reward(ASPIRIN, [SALICYLIC_ACID, ACETIC_ANHYDRIDE])
-    assert reward == 1.0
+    assert reward >= 0.9
+
+
+def test_atom_conservation_with_water_byproduct(reward_calc):
+    """Ester hydrolysis: excess atoms form EtOH, score high."""
+    product = "CC(=O)O"  # acetic acid
+    reactants = ["CC(=O)OCC", "O"]  # ethyl acetate + water
+    reward = reward_calc.atom_conservation_reward(product, reactants)
+    assert reward >= 0.9
+
+
+def test_atom_conservation_huge_excess(reward_calc):
+    """Reactants with way more atoms than product should score lower due to excess penalty."""
+    product = "CCO"  # ethanol — small molecule
+    reactants = ["CC(C)Cc1ccc(C(C)C(=O)O)cc1"]  # ibuprofen — much larger
+    reward = reward_calc.atom_conservation_reward(product, reactants)
+    assert reward < 0.6
 
 
 def test_atom_conservation_missing_atoms(reward_calc):
+    """Reactants missing product atoms should score low."""
     reward = reward_calc.atom_conservation_reward(ASPIRIN, [ETHANOL])
     assert reward < 1.0
 
 
 def test_atom_conservation_invalid(reward_calc):
+    """Invalid SMILES returns 0.0."""
     assert reward_calc.atom_conservation_reward("invalid", [ETHANOL]) == 0.0
 
 
