@@ -8,6 +8,7 @@ Usage:
     result = run_inference_hf("CC(=O)Oc1ccccc1C(=O)O", reward_calc, stock)
 """
 
+import json
 import re
 import stat
 import subprocess
@@ -55,7 +56,11 @@ def _get_llama_binary() -> Path:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     print(f"Downloading llama.cpp binary ({LLAMA_RELEASE})...")
     tar_path = CACHE_DIR / LLAMA_TAR
-    subprocess.check_call(["curl", "-L", "-o", str(tar_path), LLAMA_URL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.check_call(
+        ["curl", "-L", "-o", str(tar_path), LLAMA_URL],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     with tarfile.open(tar_path) as tar:
         for member in tar.getmembers():
             if member.name.endswith("/llama-cli"):
@@ -81,14 +86,21 @@ def _run_llama(binary: Path, model_path: Path, prompt: str, temperature: float =
     result = subprocess.run(
         [
             str(binary),
-            "-m", str(model_path),
-            "-c", "512",
-            "-n", "256",
-            "--temp", str(temperature),
-            "--top-p", "0.9",
-            "-p", prompt,
+            "-m",
+            str(model_path),
+            "-c",
+            "512",
+            "-n",
+            "256",
+            "--temp",
+            str(temperature),
+            "--top-p",
+            "0.9",
+            "-p",
+            prompt,
             "--no-display-prompt",
-            "-t", "2",
+            "-t",
+            "2",
         ],
         capture_output=True,
         text=True,
@@ -124,7 +136,11 @@ def run_inference_hf(
             "target": target_smiles,
             "routes": [],
             "best_score": 0.0,
-            "stats": {"simulations": 0, "time_seconds": time.time() - start_time, "routes_found": 0},
+            "stats": {
+                "simulations": 0,
+                "time_seconds": time.time() - start_time,
+                "routes_found": 0,
+            },
             "molecules": [],
             "error": f"Setup error: {e}",
         }
