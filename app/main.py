@@ -32,6 +32,13 @@ try:
 except ImportError:
     PI_AVAILABLE = False
 
+try:
+    from scripts.inference_hf import run_inference_hf
+
+    HF_AVAILABLE = True
+except ImportError:
+    HF_AVAILABLE = False
+
 # Preset demo molecules
 PRESETS = {
     "Ibuprofen": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
@@ -520,16 +527,32 @@ def main():
 
     # ---- Sidebar ----
     st.sidebar.title("Configuration")
+
+    backends = ["Local Model (ReactionT5)"]
+    if HF_AVAILABLE:
+        backends.append("HuggingFace Inference API")
+    if PI_AVAILABLE:
+        backends.append("Prime Intellect API")
+
     backend = st.sidebar.selectbox(
         "Inference Backend",
-        ["Prime Intellect API", "Local Model (ReactionT5)"],
-        index=0 if PI_AVAILABLE else 1,
+        backends,
+        index=0,
         key="backend",
     )
 
     pi_api_key = ""
     pi_model_id = ""
-    if backend == "Prime Intellect API":
+    hf_model_id = ""
+    if backend == "HuggingFace Inference API":
+        hf_model_id = st.sidebar.text_input(
+            "Model ID",
+            value="rhoahndur/retrosynthesis-qwen3-4b",
+            key="hf_model_id",
+        )
+        st.sidebar.caption("Uses the free HF Serverless Inference API (rate-limited).")
+        st.sidebar.success("Ready: HuggingFace Inference API")
+    elif backend == "Prime Intellect API":
         pi_api_key = st.sidebar.text_input(
             "API Key",
             type="password",
@@ -593,7 +616,15 @@ def main():
         else:
             with st.spinner("Searching for synthesis routes..."):
                 try:
-                    if backend == "Prime Intellect API":
+                    if backend == "HuggingFace Inference API":
+                        result = run_inference_hf(
+                            smiles,
+                            reward_calc,
+                            stock_list,
+                            model_id=hf_model_id,
+                            token=os.environ.get("HF_TOKEN", None),
+                        )
+                    elif backend == "Prime Intellect API":
                         client = create_pi_client(api_key=pi_api_key)
                         result = run_inference_pi(
                             smiles, client, pi_model_id, reward_calc, stock_list
