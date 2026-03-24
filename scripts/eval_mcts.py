@@ -121,8 +121,9 @@ def load_test_molecules(dataset_name: str, num_molecules: int) -> list:
                         continue
                 if not progressed:
                     break
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"WARNING: Failed to load HF dataset: {e}")
+        print("Falling back to built-in evaluation molecules.")
 
     return molecules[:num_molecules]
 
