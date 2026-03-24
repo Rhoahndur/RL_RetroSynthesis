@@ -39,6 +39,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stock_path", type=str, default="data/stock/buyables.csv")
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--output", type=str, default=None)
+    parser.add_argument(
+        "--mock", action="store_true", help="Use mock policy for CI testing (no model download)"
+    )
     return parser.parse_args()
 
 
@@ -201,11 +204,16 @@ def print_results(molecule_results: list, args) -> None:
 def main() -> None:
     args = parse_args()
 
-    print("Loading model...")
-    from models.policy import RetroPolicy
+    if args.mock:
+        from tests.conftest import MockPolicy
 
-    device = RetroPolicy.detect_device() if args.device == "auto" else args.device
-    policy = RetroPolicy(device=device)
+        policy = MockPolicy()
+    else:
+        print("Loading model...")
+        from models.policy import RetroPolicy
+
+        device = RetroPolicy.detect_device() if args.device == "auto" else args.device
+        policy = RetroPolicy(device=device)
 
     reward_calc = RewardCalculator()
     stock = StockList()

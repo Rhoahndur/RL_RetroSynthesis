@@ -45,6 +45,9 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Break down results by reaction class (requires class labels in dataset)",
     )
+    parser.add_argument(
+        "--mock", action="store_true", help="Use mock policy for CI testing (no model download)"
+    )
     return parser.parse_args()
 
 
@@ -291,11 +294,16 @@ def main() -> None:
     examples = load_eval_dataset(args.dataset, args.num_examples)
     print(f"  Loaded {len(examples)} examples")
 
-    print("Loading model...")
-    from models.policy import RetroPolicy
+    if args.mock:
+        from tests.conftest import MockPolicy
 
-    device = RetroPolicy.detect_device() if args.device == "auto" else args.device
-    policy = RetroPolicy(device=device)
+        policy = MockPolicy()
+    else:
+        print("Loading model...")
+        from models.policy import RetroPolicy
+
+        device = RetroPolicy.detect_device() if args.device == "auto" else args.device
+        policy = RetroPolicy(device=device)
 
     print(f"Evaluating top-{args.top_k} exact match...")
     results = evaluate(examples, policy, args.top_k, by_reaction_type=args.by_reaction_type)
