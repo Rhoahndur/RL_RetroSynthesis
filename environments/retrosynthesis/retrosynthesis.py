@@ -16,7 +16,9 @@ from pathlib import Path
 import verifiers as vf
 from datasets import Dataset
 from rdkit import Chem
-from rdkit.Chem import AllChem, DataStructs
+from rdkit.Chem import DataStructs, rdFingerprintGenerator
+
+_MORGAN_GEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -106,7 +108,7 @@ def _get_stock_fingerprints() -> list:
     for smi in stock:
         mol = Chem.MolFromSmiles(smi)
         if mol is not None:
-            fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+            fp = _MORGAN_GEN.GetFingerprint(mol)
             fps.append(fp)
     _STOCK_FINGERPRINTS = fps
     print(f"[retrosynthesis] Precomputed {len(fps)} fingerprints for soft matching")
@@ -323,7 +325,7 @@ def _check_stock(content: str) -> float:
         elif buyable_fps:
             mol = Chem.MolFromSmiles(frag)
             if mol is not None:
-                frag_fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+                frag_fp = _MORGAN_GEN.GetFingerprint(mol)
                 sims = DataStructs.BulkTanimotoSimilarity(frag_fp, buyable_fps)
                 max_sim = max(sims) if sims else 0.0
                 if max_sim > 0.6:
