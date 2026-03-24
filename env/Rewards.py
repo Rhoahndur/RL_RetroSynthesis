@@ -8,11 +8,26 @@ import math
 from collections import Counter
 
 from rdkit import Chem
-from rdkit.Chem import Descriptors, rdMolDescriptors
 
 # Soft stock matching: partial credit for Tanimoto similarity above this threshold
 STOCK_SIMILARITY_THRESHOLD = 0.6
 STOCK_SIMILARITY_SCALE = 1.0 - STOCK_SIMILARITY_THRESHOLD  # 0.4
+
+# Common reaction byproducts, sorted by total atoms descending for greedy matching
+COMMON_BYPRODUCTS = [
+    ("AcOH", Counter({6: 2, 1: 4, 8: 2})),  # acetic acid CH3COOH - 8 atoms
+    ("EtOH", Counter({6: 2, 1: 6, 8: 1})),  # ethanol - 9 atoms
+    ("MeOH", Counter({6: 1, 1: 4, 8: 1})),  # methanol - 6 atoms
+    ("SO2", Counter({16: 1, 8: 2})),  # sulfur dioxide - 3 atoms
+    ("CO2", Counter({6: 1, 8: 2})),  # carbon dioxide - 3 atoms
+    ("H2O", Counter({1: 2, 8: 1})),  # water - 3 atoms
+    ("NH3", Counter({7: 1, 1: 3})),  # ammonia - 4 atoms
+    ("HCl", Counter({1: 1, 17: 1})),  # hydrochloric acid
+    ("HBr", Counter({1: 1, 35: 1})),  # hydrobromic acid
+    ("HI", Counter({1: 1, 53: 1})),  # hydroiodic acid
+    ("HF", Counter({1: 1, 9: 1})),  # hydrofluoric acid
+    ("N2", Counter({7: 2})),  # nitrogen gas
+]
 
 # Default reward component weights
 DEFAULT_WEIGHTS: dict[str, float] = {
@@ -157,18 +172,20 @@ class RewardCalculator:
     def atom_conservation_reward(
         self, product_smiles: str, reactant_smiles_list: list[str]
     ) -> float:
-        """Check that atoms are approximately conserved in the reaction.
+        """Bidirectional atom conservation check with byproduct awareness.
 
-        Reactants should contain at least the atoms present in the product
-        (they may contain extra atoms from reagents/catalysts).
+        Checks both directions:
+        1. Coverage: reactant atoms must cover product atoms.
+        2. Excess penalty: unexplained excess reactant atoms are penalized,
+           but common byproducts (H2O, CO2, AcOH, etc.) are forgiven.
 
         Args:
             product_smiles: The target product SMILES.
             reactant_smiles_list: List of predicted reactant SMILES.
 
         Returns:
-            Float in [0, 1]. 1.0 if atoms are conserved, lower if atoms
-            are missing or dramatically wrong.
+            Float in [0, 1]. coverage * excess_penalty, clamped to [0, 1].
+            Returns 0.0 for invalid inputs.
         """
         if not product_smiles or not reactant_smiles_list:
             return 0.0
@@ -177,38 +194,61 @@ class RewardCalculator:
             product_mol = Chem.MolFromSmiles(product_smiles)
             if product_mol is None:
                 return 0.0
+            product_mol = Chem.AddHs(product_mol)
 
-            # Count atoms in product (by atomic number)
-            product_atoms: Counter = Counter()
+            # Count product atoms by element (atomic number), including H
+            product_counts: Counter = Counter()
             for atom in product_mol.GetAtoms():
-                product_atoms[atom.GetAtomicNum()] += 1
+                product_counts[atom.GetAtomicNum()] += 1
 
-            # Count atoms in combined reactants
-            reactant_atoms: Counter = Counter()
+            # Count combined reactant atoms, including H
+            reactant_counts: Counter = Counter()
             for r_smi in reactant_smiles_list:
                 r_mol = Chem.MolFromSmiles(r_smi)
                 if r_mol is None:
                     return 0.0
+                r_mol = Chem.AddHs(r_mol)
                 for atom in r_mol.GetAtoms():
-                    reactant_atoms[atom.GetAtomicNum()] += 1
+                    reactant_counts[atom.GetAtomicNum()] += 1
 
-            # For each atom type in the product, check how well it is covered
-            # by the reactants. Reactants may have extra atoms (leaving groups,
-            # reagent fragments) which is fine. Missing atoms are penalized.
-            total_product_atoms = sum(product_atoms.values())
+            total_product_atoms = sum(product_counts.values())
             if total_product_atoms == 0:
                 return 0.0
 
-            covered_atoms = 0
-            for atomic_num, count in product_atoms.items():
-                reactant_count = reactant_atoms.get(atomic_num, 0)
-                # Credit = min(what we need, what we have)
-                covered_atoms += min(count, reactant_count)
+            # Coverage — fraction of product atoms present in reactants
+            covered = sum(min(product_counts[z], reactant_counts.get(z, 0)) for z in product_counts)
+            coverage = covered / total_product_atoms
 
-            # Fraction of product atoms accounted for in reactants
-            conservation_ratio = covered_atoms / total_product_atoms
+            # Compute excess per element
+            excess: Counter = Counter()
+            for z in reactant_counts:
+                diff = reactant_counts[z] - product_counts.get(z, 0)
+                if diff > 0:
+                    excess[z] = diff
 
-            return max(0.0, min(1.0, conservation_ratio))
+            # Greedily subtract common byproducts from excess
+            for _name, formula in COMMON_BYPRODUCTS:
+                while True:
+                    if all(excess.get(z, 0) >= cnt for z, cnt in formula.items()):
+                        for z, cnt in formula.items():
+                            excess[z] -= cnt
+                            if excess[z] <= 0:
+                                del excess[z]
+                    else:
+                        break
+
+            # Remaining unexplained excess
+            remaining_excess = sum(excess.values())
+            total_reactant_atoms = sum(reactant_counts.values())
+
+            # Excess penalty
+            if total_reactant_atoms > 0:
+                excess_penalty = 1.0 - (remaining_excess / total_reactant_atoms)
+                excess_penalty = max(0.0, min(1.0, excess_penalty))
+            else:
+                excess_penalty = 1.0
+
+            return max(0.0, min(1.0, coverage * excess_penalty))
 
         except Exception:
             return 0.0
@@ -280,21 +320,14 @@ class RewardCalculator:
     def compute_sascore(smiles: str) -> float | None:
         """Compute the Synthetic Accessibility score for a single molecule.
 
-        Uses a proxy based on RDKit molecular descriptors:
-        - Lipophilicity (MolLogP)
-        - Ring count (CalcNumRings)
-        - Rotatable bonds (CalcNumRotatableBonds)
-        - Heavy atom count (CalcNumHeavyAtoms)
-
-        These are combined into a score where simpler molecules receive
-        lower scores, roughly matching the 1-10 range of the original
-        Ertl & Schuffenhauer SA score.
+        Uses the Ertl & Schuffenhauer algorithm (J. Cheminformatics 1:8, 2009)
+        based on molecular fragment contributions and complexity penalties.
 
         Args:
             smiles: SMILES string.
 
         Returns:
-            SAscore float (typically 1-10, lower = easier to synthesize).
+            SAscore float (1-10, lower = easier to synthesize).
             Returns None if SMILES is invalid.
         """
         if not smiles or not isinstance(smiles, str):
@@ -303,36 +336,8 @@ class RewardCalculator:
             mol = Chem.MolFromSmiles(smiles)
             if mol is None:
                 return None
+            from lib.sascorer import calculateScore
 
-            # Compute descriptors
-            logp = abs(Descriptors.MolLogP(mol))
-            num_rings = rdMolDescriptors.CalcNumRings(mol)
-            num_rot_bonds = rdMolDescriptors.CalcNumRotatableBonds(mol)
-            num_heavy_atoms = rdMolDescriptors.CalcNumHeavyAtoms(mol)
-
-            # Size complexity: larger molecules are harder.
-            # Map heavy atom count into a contribution.  Typical drug-like
-            # molecules have 15-30 heavy atoms.
-            size_score = math.log(max(num_heavy_atoms, 1) + 1.0)  # ~1.1 to ~3.5
-
-            # Ring complexity: more rings (especially fused) = harder
-            ring_score = num_rings * 0.5  # 0 to ~3
-
-            # Flexibility: many rotatable bonds can make synthesis easier
-            # (linear chains) but also indicates a larger molecule.
-            flex_score = num_rot_bonds * 0.1  # 0 to ~1.5
-
-            # Polarity/lipophilicity: extreme logP values indicate
-            # harder-to-handle compounds.
-            lipo_score = logp * 0.2  # 0 to ~2
-
-            # Combine into a raw score
-            raw_score = 1.0 + size_score + ring_score + flex_score + lipo_score
-
-            # Clamp to typical SA score range [1, 10]
-            sa_score = max(1.0, min(10.0, raw_score))
-
-            return sa_score
-
+            return calculateScore(mol)
         except Exception:
             return None
