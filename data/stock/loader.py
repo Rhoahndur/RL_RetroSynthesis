@@ -2,8 +2,13 @@
 
 Provides O(1) lookup to check if a molecule is purchasable.
 All SMILES are stored and compared in canonical form via RDKit.
+
+Supported formats:
+  - CSV (smiles,name,category with header row)
+  - Gzipped SMILES (.smi.gz, one canonical SMILES per line)
 """
 
+import gzip
 import os
 
 from rdkit import Chem
@@ -18,6 +23,7 @@ class StockList:
     Usage:
         stock = StockList()
         stock.load()  # or stock.load("/path/to/buyables.csv")
+        stock.load("/path/to/buyables_full.smi.gz")  # gzipped SMILES
         stock.is_buyable("CCO")  # True if ethanol is in the list
     """
 
@@ -26,24 +32,35 @@ class StockList:
         self._fingerprints: list = []
         self._loaded = False
 
-    def load(self, csv_path: str | None = None) -> "StockList":
-        """Load buyable molecules from a CSV file.
+    @property
+    def _smiles(self) -> set[str]:
+        """Alias used by load_smi_gz (matches internal set)."""
+        return self._canonical_smiles
 
-        CSV format: smiles,name,category (header row expected).
-        All SMILES are canonicalized on load for consistent matching.
+    def load(self, path: str | None = None) -> "StockList":
+        """Load buyable molecules from a file.
+
+        Auto-detects format based on file extension:
+          - ``.smi.gz`` -- gzipped SMILES (one per line)
+          - anything else -- CSV with ``smiles,name,category`` header
 
         Args:
-            csv_path: Path to CSV file. Defaults to data/stock/buyables.csv.
+            path: Path to stock file.  Defaults to ``data/stock/buyables.csv``.
 
         Returns:
             self (for chaining)
         """
-        if csv_path is None:
-            csv_path = DEFAULT_STOCK_PATH
+        if path is None:
+            path = DEFAULT_STOCK_PATH
 
+        if path.endswith(".smi.gz"):
+            self.load_smi_gz(path)
+            return self
+
+        # CSV loading (original behaviour)
         self._canonical_smiles.clear()
 
-        with open(csv_path) as f:
+        with open(path) as f:
             f.readline()  # skip header row
             for line in f:
                 line = line.strip()
@@ -59,16 +76,31 @@ class StockList:
                     self._canonical_smiles.add(canon)
 
         self._loaded = True
+        self._precompute_fingerprints()
+        return self
 
-        # Precompute Morgan fingerprints for similarity lookups
+    def load_smi_gz(self, path: str = "data/stock/buyables_full.smi.gz") -> None:
+        """Load stock list from a gzipped SMILES file (one SMILES per line)."""
+        self._canonical_smiles.clear()
+        with gzip.open(path, "rt") as f:
+            for line in f:
+                smi = line.strip()
+                if smi:
+                    canon = self.canonicalize(smi)
+                    if canon:
+                        self._canonical_smiles.add(canon)
+        self._loaded = True
+        self._precompute_fingerprints()
+        print(f"Loaded {len(self._canonical_smiles)} buyable molecules from {path}")
+
+    def _precompute_fingerprints(self) -> None:
+        """Precompute Morgan fingerprints for similarity lookups."""
         self._fingerprints = []
         for smi in self._canonical_smiles:
             mol = Chem.MolFromSmiles(smi)
             if mol is not None:
                 fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
                 self._fingerprints.append(fp)
-
-        return self
 
     def is_buyable(self, smiles: str) -> bool:
         """Check if a molecule is in the stock list.
