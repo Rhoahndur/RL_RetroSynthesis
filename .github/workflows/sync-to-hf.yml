@@ -19,4 +19,14 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           pip install 'huggingface_hub[hf_xet]'
-          huggingface-cli upload rhoahndur/retrosynthesis-ai . . --repo-type space --token $HF_TOKEN
+          python -c "
+          from huggingface_hub import HfApi
+          import os
+          api = HfApi(token=os.environ['HF_TOKEN'])
+          api.upload_folder(
+              folder_path='.',
+              repo_id='rhoahndur/retrosynthesis-ai',
+              repo_type='space',
+          )
+          print('Upload complete')
+          "
