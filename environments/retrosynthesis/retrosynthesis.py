@@ -6,15 +6,17 @@ inline so the package can be pushed to Prime Intellect's hub independently.
 """
 
 import asyncio
+import gzip
 import json
 import math
 import re
 from collections import Counter
+from pathlib import Path
 
 import verifiers as vf
 from datasets import Dataset
 from rdkit import Chem
-from rdkit.Chem import AllChem, DataStructs, Descriptors, rdMolDescriptors
+from rdkit.Chem import AllChem, DataStructs
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -34,101 +36,81 @@ Input: CC(=O)Oc1ccccc1C(=O)O
 Output: OC(=O)c1ccccc1O.CC(=O)OC(C)=O"""
 
 # ---------------------------------------------------------------------------
-# ~200 buyable SMILES (canonical) for stock checking
+# Minimal fallback buyable SMILES (used only when data file is missing)
 # ---------------------------------------------------------------------------
 
-BUYABLE_SMILES = {
+_FALLBACK_BUYABLES = {
     "O",
     "CO",
     "CCO",
-    "CCCO",
-    "CC(C)O",
     "CC(=O)O",
     "CC=O",
     "C=O",
-    "CC(=O)OC(C)=O",
-    "ClC(Cl)Cl",
-    "ClCCl",
-    "CS(C)=O",
-    "c1ccncc1",
-    "c1ccoc1",
-    "c1ccsc1",
+    "N",
+    "CN",
     "c1ccccc1",
-    "Cc1ccccc1",
     "Oc1ccccc1",
     "Nc1ccccc1",
     "Clc1ccccc1",
-    "Brc1ccccc1",
-    "O=[N+]([O-])c1ccccc1",
-    "N",
-    "CN",
-    "CCN",
-    "CC(C)N",
-    "C(=O)N",
-    "NCC(=O)O",
-    "Nc1ccc(O)cc1",
-    "OC(=O)c1ccccc1O",
-    "CC(C)Cc1ccccc1",
+    "CC(=O)OC(C)=O",
     "CC(=O)Cl",
-    "CCC(=O)Cl",
-    "O=C(Cl)c1ccccc1",
     "CI",
     "CBr",
     "CCl",
-    "CCBr",
-    "CCCl",
-    "CCI",
-    "C=C",
-    "C=Cc1ccccc1",
-    "C#C",
-    "C#Cc1ccccc1",
-    "O=CO",
-    "OC(=O)c1ccccc1",
-    "O=C(O)CC(=O)O",
-    "[Na+].[OH-]",
-    "[K+].[OH-]",
-    "[Na+].[Cl-]",
-    "O=S(=O)(O)O",
-    "O=C(O)/C=C\\C(=O)O",
-    "O=C(O)/C=C/C(=O)O",
-    "CC(=O)OCC",
-    "CCOC(=O)CC(=O)OCC",
-    "CCOC(C)=O",
-    "CC(C)=O",
-    "O=C(c1ccccc1)c1ccccc1",
-    "O=C1CCCCC1",
-    "C1CCOC1",
-    "C1COCCO1",
-    "C1CCNCC1",
-    "C1CNCCN1",
-    "CCCCCCCCCCCCCCCCCCCC",
-    "CCCCCCCCC=CCCCCCCCC",
+    "OC(=O)c1ccccc1O",
+    "Nc1ccc(O)cc1",
     "B(O)O",
-    "OB(O)c1ccccc1",
-    "C1=CC=C(B(O)O)C=C1",
-    "[Al+3].[Cl-].[Cl-].[Cl-]",
-    "c1ccc2[nH]ccc2c1",
-    "c1ccc2ccccc2c1",
-    "CC(=O)c1ccc(CC(C)C)cc1",
-    "O=C1OC(=O)c2ccccc21",
 }
 
-# Precomputed Morgan fingerprints for soft stock matching
-_BUYABLE_FINGERPRINTS: list | None = None
+# ---------------------------------------------------------------------------
+# Lazy-loading stock globals
+# ---------------------------------------------------------------------------
+
+_STOCK_SMILES: set[str] | None = None
+_STOCK_FINGERPRINTS: list | None = None
 
 
-def _get_buyable_fingerprints() -> list:
-    """Lazily compute Morgan fingerprints for all buyable SMILES."""
-    global _BUYABLE_FINGERPRINTS
-    if _BUYABLE_FINGERPRINTS is None:
-        fps = []
-        for smi in BUYABLE_SMILES:
-            mol = Chem.MolFromSmiles(smi)
-            if mol is not None:
-                fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
-                fps.append(fp)
-        _BUYABLE_FINGERPRINTS = fps
-    return _BUYABLE_FINGERPRINTS
+def _get_stock_smiles() -> set[str]:
+    """Lazily load stock SMILES from bundled data file."""
+    global _STOCK_SMILES
+    if _STOCK_SMILES is not None:
+        return _STOCK_SMILES
+
+    data_path = Path(__file__).parent / "data" / "buyables.smi.gz"
+    if data_path.exists():
+        smiles: set[str] = set()
+        with gzip.open(data_path, "rt") as f:
+            for line in f:
+                smi = line.strip()
+                if smi:
+                    smiles.add(smi)
+        _STOCK_SMILES = smiles
+        print(f"[retrosynthesis] Loaded {len(smiles)} buyable SMILES from {data_path.name}")
+    else:
+        _STOCK_SMILES = set(_FALLBACK_BUYABLES)
+        print(
+            f"[retrosynthesis] WARNING: Stock file not found at {data_path}, "
+            f"using {len(_STOCK_SMILES)} fallback SMILES"
+        )
+    return _STOCK_SMILES
+
+
+def _get_stock_fingerprints() -> list:
+    """Lazily compute Morgan fingerprints for all stock SMILES."""
+    global _STOCK_FINGERPRINTS
+    if _STOCK_FINGERPRINTS is not None:
+        return _STOCK_FINGERPRINTS
+
+    stock = _get_stock_smiles()
+    fps = []
+    for smi in stock:
+        mol = Chem.MolFromSmiles(smi)
+        if mol is not None:
+            fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+            fps.append(fp)
+    _STOCK_FINGERPRINTS = fps
+    print(f"[retrosynthesis] Precomputed {len(fps)} fingerprints for soft matching")
+    return _STOCK_FINGERPRINTS
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +173,22 @@ TRAINING_MOLECULES = [
 
 _SMILES_RE = re.compile(r"^[A-Za-z0-9@+\-\[\]\(\)\\/=#$:.%\s]+$")
 
+# Common reaction byproducts for bidirectional atom balance checking
+_COMMON_BYPRODUCTS = [
+    ("AcOH", Counter({6: 2, 1: 4, 8: 2})),  # acetic acid CH3COOH - 8 atoms
+    ("EtOH", Counter({6: 2, 1: 6, 8: 1})),  # ethanol - 9 atoms
+    ("MeOH", Counter({6: 1, 1: 4, 8: 1})),  # methanol - 6 atoms
+    ("SO2", Counter({16: 1, 8: 2})),  # sulfur dioxide - 3 atoms
+    ("CO2", Counter({6: 1, 8: 2})),  # carbon dioxide - 3 atoms
+    ("H2O", Counter({1: 2, 8: 1})),  # water - 3 atoms
+    ("NH3", Counter({7: 1, 1: 3})),  # ammonia - 4 atoms
+    ("HCl", Counter({1: 1, 17: 1})),  # hydrochloric acid
+    ("HBr", Counter({1: 1, 35: 1})),  # hydrobromic acid
+    ("HI", Counter({1: 1, 53: 1})),  # hydroiodic acid
+    ("HF", Counter({1: 1, 9: 1})),  # hydrofluoric acid
+    ("N2", Counter({7: 2})),  # nitrogen gas
+]
+
 # ---------------------------------------------------------------------------
 # Private helper functions
 # ---------------------------------------------------------------------------
@@ -231,27 +229,17 @@ def _canonicalize(smi: str) -> str | None:
 def _compute_sascore(smiles: str) -> float | None:
     """Compute synthetic accessibility score for a single molecule.
 
-    Uses RDKit descriptors as a proxy (lipophilicity, ring count,
-    rotatable bonds, heavy atom count). Returns a value in [1, 10]
-    where lower means easier to synthesize.
+    Uses the Ertl & Schuffenhauer algorithm (J. Cheminformatics 1:8, 2009)
+    based on molecular fragment contributions and complexity penalties.
+    Returns a value in [1, 10] where lower means easier to synthesize.
     """
     try:
+        from sascorer import calculateScore
+
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             return None
-
-        logp = abs(Descriptors.MolLogP(mol))
-        num_rings = rdMolDescriptors.CalcNumRings(mol)
-        num_rot_bonds = rdMolDescriptors.CalcNumRotatableBonds(mol)
-        num_heavy_atoms = rdMolDescriptors.CalcNumHeavyAtoms(mol)
-
-        size_score = math.log(max(num_heavy_atoms, 1) + 1.0)
-        ring_score = num_rings * 0.5
-        flex_score = num_rot_bonds * 0.1
-        lipo_score = logp * 0.2
-
-        raw_score = 1.0 + size_score + ring_score + flex_score + lipo_score
-        return max(1.0, min(10.0, raw_score))
+        return calculateScore(mol)
     except Exception:
         return None
 
@@ -265,6 +253,7 @@ def _get_atom_counts(smiles: str) -> Counter | None:
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             return None
+        mol = Chem.AddHs(mol)
         counts: Counter = Counter()
         for atom in mol.GetAtoms():
             counts[atom.GetAtomicNum()] += 1
@@ -313,7 +302,7 @@ def _check_sascore(content: str, product_smiles: str) -> float:
     return 1.0 / (1.0 + math.exp(-improvement))
 
 
-def _check_stock(content: str, stock_set: set) -> float:
+def _check_stock(content: str) -> float:
     """Synchronous helper: return stock score with soft similarity matching.
 
     Exact matches get 1.0 per fragment. Non-matches get partial credit
@@ -324,14 +313,14 @@ def _check_stock(content: str, stock_set: set) -> float:
     if not fragments:
         return 0.0
 
-    buyable_fps = _get_buyable_fingerprints()
+    stock_set = _get_stock_smiles()
+    buyable_fps = _get_stock_fingerprints()
     total_score = 0.0
     for frag in fragments:
         canon = _canonicalize(frag)
         if canon is not None and canon in stock_set:
             total_score += 1.0
         elif buyable_fps:
-            # Soft reward: partial credit for similarity to buyables
             mol = Chem.MolFromSmiles(frag)
             if mol is not None:
                 frag_fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
@@ -343,8 +332,15 @@ def _check_stock(content: str, stock_set: set) -> float:
 
 
 def _check_atom_conservation(content: str, product_smiles: str) -> float:
-    """Synchronous helper: return fraction of product atoms covered by
-    the combined reactants."""
+    """Bidirectional atom conservation check with byproduct awareness.
+
+    Checks both directions:
+    1. Coverage: reactant atoms must cover product atoms.
+    2. Excess penalty: unexplained excess reactant atoms are penalized,
+       but common byproducts (H2O, CO2, AcOH, etc.) are forgiven.
+
+    Returns coverage * excess_penalty, clamped to [0, 1].
+    """
     product_counts = _get_atom_counts(product_smiles)
     if product_counts is None:
         return 0.0
@@ -362,18 +358,46 @@ def _check_atom_conservation(content: str, product_smiles: str) -> float:
     for frag in fragments:
         frag_counts = _get_atom_counts(frag)
         if frag_counts is None:
-            # Skip invalid fragments rather than returning 0
             continue
         reactant_counts += frag_counts
 
     if not reactant_counts:
         return 0.0
 
-    covered = 0
-    for atomic_num, count in product_counts.items():
-        covered += min(count, reactant_counts.get(atomic_num, 0))
+    # Coverage — fraction of product atoms present in reactants
+    covered = sum(min(product_counts[z], reactant_counts.get(z, 0)) for z in product_counts)
+    coverage = covered / total_product_atoms
 
-    return max(0.0, min(1.0, covered / total_product_atoms))
+    # Compute excess per element
+    excess: Counter = Counter()
+    for z in reactant_counts:
+        diff = reactant_counts[z] - product_counts.get(z, 0)
+        if diff > 0:
+            excess[z] = diff
+
+    # Greedily subtract common byproducts from excess
+    for _name, formula in _COMMON_BYPRODUCTS:
+        while True:
+            if all(excess.get(z, 0) >= cnt for z, cnt in formula.items()):
+                for z, cnt in formula.items():
+                    excess[z] -= cnt
+                    if excess[z] <= 0:
+                        del excess[z]
+            else:
+                break
+
+    # Remaining unexplained excess
+    remaining_excess = sum(excess.values())
+    total_reactant_atoms = sum(reactant_counts.values())
+
+    # Excess penalty
+    if total_reactant_atoms > 0:
+        excess_penalty = 1.0 - (remaining_excess / total_reactant_atoms)
+        excess_penalty = max(0.0, min(1.0, excess_penalty))
+    else:
+        excess_penalty = 1.0
+
+    return max(0.0, min(1.0, coverage * excess_penalty))
 
 
 # ---------------------------------------------------------------------------
@@ -399,8 +423,6 @@ def build_dataset(split: str, difficulty: str) -> Dataset:
     """
     from datasets import load_dataset as hf_load_dataset
 
-    stock_list = sorted(BUYABLE_SMILES)
-
     # Try loading from HuggingFace Hub
     try:
         hf_split = "test" if split == "test" else "train"
@@ -412,12 +434,7 @@ def build_dataset(split: str, difficulty: str) -> Dataset:
             answer = row.get("answer", "")
             if not product:
                 continue
-            info = json.dumps(
-                {
-                    "product_smiles": product,
-                    "stock_list": stock_list,
-                }
-            )
+            info = json.dumps({"product_smiles": product})
             rows.append(
                 {
                     "question": f"Predict the reactants for: {product}",
@@ -427,26 +444,29 @@ def build_dataset(split: str, difficulty: str) -> Dataset:
             )
 
         if rows:
+            print(
+                f"[retrosynthesis] Loaded {len(rows)} examples from HF dataset"
+                f" '{HF_DATASET}' (split={hf_split})"
+            )
             return Dataset.from_list(rows)
-    except Exception:
-        pass
+        else:
+            print(f"[retrosynthesis] WARNING: HF dataset '{HF_DATASET}' returned 0 valid rows")
+    except Exception as e:
+        print(f"[retrosynthesis] WARNING: Failed to load HF dataset '{HF_DATASET}': {e}")
+        print("[retrosynthesis] Falling back to inline demo molecules")
 
     # Fallback to inline molecules
     if split == "test":
         molecules = DEMO_MOLECULES
     else:
         molecules = DEMO_MOLECULES + TRAINING_MOLECULES
+    print(f"[retrosynthesis] Using {len(molecules)} inline fallback molecules (split={split})")
 
     rows = []
     for mol in molecules:
         product = mol["product"]
         answer = mol.get("reactants", "")
-        info = json.dumps(
-            {
-                "product_smiles": product,
-                "stock_list": stock_list,
-            }
-        )
+        info = json.dumps({"product_smiles": product})
         rows.append(
             {
                 "question": f"Predict the reactants for: {product}",
@@ -530,18 +550,14 @@ def build_rubric() -> vf.Rubric:
     # ------------------------------------------------------------------
     # 4. Stock reward (weight 0.25)
     # ------------------------------------------------------------------
-    async def stock_reward(completion, info, **kwargs) -> float:
+    async def stock_reward(completion, **kwargs) -> float:
         """Return the fraction of predicted reactants that are buyable.
         Gives a small floor for any valid SMILES output."""
         try:
-            if isinstance(info, str):
-                info = json.loads(info)
-            stock_list = info["stock_list"]
-            stock_set = set(stock_list)
             content = completion[-1]["content"].strip()
             if not content:
                 return 0.0
-            result = await asyncio.to_thread(_check_stock, content, stock_set)
+            result = await asyncio.to_thread(_check_stock, content)
             # Give 0.05 floor if at least some valid SMILES were produced
             validity = await asyncio.to_thread(_check_validity, content)
             if validity > 0 and result == 0:
@@ -605,7 +621,7 @@ def build_rubric() -> vf.Rubric:
             stock_reward,
             atom_conservation_reward,
         ],
-        weights=[0.15, 0.1, 0.25, 0.15, 0.25, 0.1],
+        weights=[0.10, 0.1, 0.25, 0.15, 0.25, 0.15],
     )
 
 
