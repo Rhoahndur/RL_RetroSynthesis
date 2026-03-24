@@ -114,17 +114,17 @@ def test_save_checkpoint_prunes_old(tmp_path, mock_policy):
     assert len(remaining) == 4, f"Expected 4 checkpoints, got {len(remaining)}: {remaining_names}"
 
     # The best-reward checkpoint (step 2) must survive
-    assert any(
-        "step2" in f.name for f in remaining
-    ), f"Best-reward checkpoint (step2) was pruned. Remaining: {remaining_names}"
+    assert any("step2" in f.name for f in remaining), (
+        f"Best-reward checkpoint (step2) was pruned. Remaining: {remaining_names}"
+    )
 
     # The last 3 by step (3, 4, 5) must survive
     for step_num in (3, 4, 5):
-        assert any(
-            f"step{step_num}" in f.name for f in remaining
-        ), f"Checkpoint step{step_num} was pruned. Remaining: {remaining_names}"
+        assert any(f"step{step_num}" in f.name for f in remaining), (
+            f"Checkpoint step{step_num} was pruned. Remaining: {remaining_names}"
+        )
 
     # Step 1 (lowest step, not best reward) should be pruned
-    assert not any(
-        "step1" in f.name for f in remaining
-    ), f"Checkpoint step1 should have been pruned. Remaining: {remaining_names}"
+    assert not any("step1" in f.name for f in remaining), (
+        f"Checkpoint step1 should have been pruned. Remaining: {remaining_names}"
+    )

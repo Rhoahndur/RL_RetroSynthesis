@@ -19,7 +19,6 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Optional
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -47,8 +46,8 @@ Output: OC(=O)c1ccccc1O.CC(=O)OC(C)=O"""
 
 
 def create_pi_client(
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
 ) -> OpenAI:
     """Create an OpenAI-compatible client for Prime Intellect's API.
 

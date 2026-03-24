@@ -73,9 +73,7 @@ def download_and_process(output_dir: str, stock_path: str) -> None:
         for candidate in ["input", "Input", "Product", "product", "PRODUCT"]:
             if candidate in df.columns:
                 return candidate
-        raise KeyError(
-            f"Could not find product column. Available columns: {list(df.columns)}"
-        )
+        raise KeyError(f"Could not find product column. Available columns: {list(df.columns)}")
 
     # ------------------------------------------------------------------
     # Helper: process one split (extract, canonicalize, deduplicate)

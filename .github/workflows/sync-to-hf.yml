@@ -15,4 +15,8 @@ jobs:
       - name: Push to HuggingFace Spaces
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push https://rhoahndur:$HF_TOKEN@huggingface.co/spaces/rhoahndur/retrosynthesis-ai main
+        run: |
+          echo "Token length: ${#HF_TOKEN}"
+          echo "Token prefix: ${HF_TOKEN:0:3}"
+          git remote add hf https://user:${HF_TOKEN}@huggingface.co/spaces/rhoahndur/retrosynthesis-ai
+          git push hf main

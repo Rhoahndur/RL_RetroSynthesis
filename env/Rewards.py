@@ -6,7 +6,6 @@ into a single scalar reward in [0, 1].
 
 import math
 from collections import Counter
-from typing import Optional
 
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors
@@ -35,7 +34,7 @@ class RewardCalculator:
         reward = calc.combined_reward(product_smi, reactant_smi_list, stock)
     """
 
-    def __init__(self, weights: Optional[dict[str, float]] = None) -> None:
+    def __init__(self, weights: dict[str, float] | None = None) -> None:
         """Initialize with optional custom reward weights.
 
         Args:
@@ -219,7 +218,7 @@ class RewardCalculator:
         product_smiles: str,
         reactant_smiles_list: list[str],
         stock_list,
-        weights: Optional[dict[str, float]] = None,
+        weights: dict[str, float] | None = None,
     ) -> float:
         """Compute the weighted combination of all reward components.
 
@@ -278,7 +277,7 @@ class RewardCalculator:
         return max(0.0, min(1.0, final_reward))
 
     @staticmethod
-    def compute_sascore(smiles: str) -> Optional[float]:
+    def compute_sascore(smiles: str) -> float | None:
         """Compute the Synthetic Accessibility score for a single molecule.
 
         Uses a proxy based on RDKit molecular descriptors:

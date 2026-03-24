@@ -6,7 +6,6 @@ from env.ChemEnv import ChemEnv
 
 
 class TestChemEnv:
-
     @pytest.fixture(autouse=True)
     def _make_env(self, mock_policy, reward_calc, stock_list):
         """Create a ChemEnv instance available as self.env for every test."""

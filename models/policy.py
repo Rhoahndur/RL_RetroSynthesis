@@ -6,7 +6,6 @@ log-probability computation, and checkpoint management.
 """
 
 from pathlib import Path
-from typing import Optional
 
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
@@ -26,7 +25,7 @@ class RetroPolicy:
     def __init__(
         self,
         model_name: str = DEFAULT_MODEL_NAME,
-        device: Optional[str] = None,
+        device: str | None = None,
     ) -> None:
         """Load the ReactionT5 model and tokenizer.
 
@@ -202,7 +201,7 @@ class RetroPolicy:
         path: str,
         step: int,
         reward: float,
-        optimizer: Optional[torch.optim.Optimizer] = None,
+        optimizer: torch.optim.Optimizer | None = None,
     ) -> None:
         """Save model checkpoint to disk.
 

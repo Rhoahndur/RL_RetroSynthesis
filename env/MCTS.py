@@ -76,7 +76,7 @@ class MCTSResult:
         stats: Search statistics.
     """
 
-    best_route: Optional[dict] = None
+    best_route: dict | None = None
     score: float = 0.0
     all_routes: list[dict] = field(default_factory=list)
     stats: dict = field(
@@ -495,7 +495,7 @@ class MCTS:
             node: Leaf node to start backpropagation from.
             value: Reward value to propagate.
         """
-        current: Optional[MCTSNode] = node
+        current: MCTSNode | None = node
         while current is not None:
             current.visit_count += 1
             current.total_value += value
@@ -558,7 +558,7 @@ class MCTS:
 
         return result
 
-    def _build_route_tree(self, node: MCTSNode, group: list[MCTSNode]) -> Optional[dict]:
+    def _build_route_tree(self, node: MCTSNode, group: list[MCTSNode]) -> dict | None:
         """Recursively build a route dict from a node and one of its child groups.
 
         Args:

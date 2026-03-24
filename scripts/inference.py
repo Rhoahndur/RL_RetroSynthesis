@@ -18,7 +18,6 @@ import io
 import json
 import sys
 from pathlib import Path
-from typing import Optional
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -29,7 +28,7 @@ from env.Rewards import RewardCalculator
 from models.policy import RetroPolicy
 
 
-def load_model(checkpoint_path: Optional[str] = None, device: Optional[str] = None) -> RetroPolicy:
+def load_model(checkpoint_path: str | None = None, device: str | None = None) -> RetroPolicy:
     """Load a RetroPolicy from a checkpoint or use pre-trained weights.
 
     Args:
@@ -59,7 +58,7 @@ def load_model(checkpoint_path: Optional[str] = None, device: Optional[str] = No
     return policy
 
 
-def mol_to_base64_image(smiles: str, size: tuple = (300, 300)) -> Optional[str]:
+def mol_to_base64_image(smiles: str, size: tuple = (300, 300)) -> str | None:
     """Render a molecule SMILES as a PNG image encoded in base64.
 
     Args:

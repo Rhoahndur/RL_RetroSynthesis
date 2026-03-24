@@ -406,8 +406,7 @@ def display_retrosynthesis_diagram(route, reward_calc, stock_list, step=1, max_d
     # Note invalid predictions if any
     if invalid_smiles:
         st.caption(
-            f"Note: {len(invalid_smiles)} invalid prediction(s) "
-            f"were filtered out from this step."
+            f"Note: {len(invalid_smiles)} invalid prediction(s) were filtered out from this step."
         )
 
     # Reagent details in expander

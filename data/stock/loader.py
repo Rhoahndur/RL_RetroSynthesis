@@ -5,7 +5,6 @@ All SMILES are stored and compared in canonical form via RDKit.
 """
 
 import os
-from typing import Optional
 
 from rdkit import Chem
 from rdkit.Chem import AllChem, DataStructs
@@ -27,7 +26,7 @@ class StockList:
         self._fingerprints: list = []
         self._loaded = False
 
-    def load(self, csv_path: Optional[str] = None) -> "StockList":
+    def load(self, csv_path: str | None = None) -> "StockList":
         """Load buyable molecules from a CSV file.
 
         CSV format: smiles,name,category (header row expected).
@@ -90,7 +89,7 @@ class StockList:
         return canon in self._canonical_smiles
 
     @staticmethod
-    def canonicalize(smiles: str) -> Optional[str]:
+    def canonicalize(smiles: str) -> str | None:
         """Convert a SMILES string to its canonical RDKit form.
 
         Args:

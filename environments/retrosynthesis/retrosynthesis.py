@@ -10,7 +10,6 @@ import json
 import math
 import re
 from collections import Counter
-from typing import Optional
 
 import verifiers as vf
 from datasets import Dataset
@@ -115,7 +114,7 @@ BUYABLE_SMILES = {
 }
 
 # Precomputed Morgan fingerprints for soft stock matching
-_BUYABLE_FINGERPRINTS: Optional[list] = None
+_BUYABLE_FINGERPRINTS: list | None = None
 
 
 def _get_buyable_fingerprints() -> list:
@@ -215,7 +214,7 @@ def _parse_reactants(completion) -> list[str]:
         return []
 
 
-def _canonicalize(smi: str) -> Optional[str]:
+def _canonicalize(smi: str) -> str | None:
     """Canonicalize a SMILES string via RDKit.
 
     Returns None if the SMILES is invalid.
@@ -229,7 +228,7 @@ def _canonicalize(smi: str) -> Optional[str]:
         return None
 
 
-def _compute_sascore(smiles: str) -> Optional[float]:
+def _compute_sascore(smiles: str) -> float | None:
     """Compute synthetic accessibility score for a single molecule.
 
     Uses RDKit descriptors as a proxy (lipophilicity, ring count,
@@ -257,7 +256,7 @@ def _compute_sascore(smiles: str) -> Optional[float]:
         return None
 
 
-def _get_atom_counts(smiles: str) -> Optional[Counter]:
+def _get_atom_counts(smiles: str) -> Counter | None:
     """Count atoms (by atomic number) in a molecule.
 
     Returns None if the SMILES is invalid.
