@@ -8,14 +8,11 @@ Usage:
     result = run_inference_hf("CC(=O)Oc1ccccc1C(=O)O", reward_calc, stock)
 """
 
-import json
-import os
 import re
 import stat
 import subprocess
 import sys
 import tarfile
-import tempfile
 import time
 from pathlib import Path
 
@@ -73,7 +70,7 @@ def _get_llama_binary() -> Path:
 
 def _get_model_path() -> Path:
     """Download GGUF model from HuggingFace Hub."""
-    print(f"Ensuring GGUF model is downloaded...")
+    print("Ensuring GGUF model is downloaded...")
     path = hf_hub_download(repo_id=GGUF_REPO, filename=GGUF_FILE)
     print(f"Model at {path}")
     return Path(path)
