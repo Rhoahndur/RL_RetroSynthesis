@@ -1,7 +1,7 @@
-"""GGUF CPU inference for retrosynthesis via pre-built llama.cpp binary.
+"""GGUF CPU inference for retrosynthesis via llama-server.
 
-Downloads the llama.cpp CLI binary and GGUF model from HuggingFace Hub,
-runs inference as a subprocess. No compilation, no GPU, no API key.
+Runs a persistent llama-server process that loads the model once and serves
+requests via an OpenAI-compatible HTTP API. No compilation, no GPU, no API key.
 
 Usage:
     from scripts.inference_hf import run_inference_hf
@@ -9,13 +9,17 @@ Usage:
 """
 
 import json
+import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
 import tarfile
 import time
 from pathlib import Path
+
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -33,6 +37,7 @@ LLAMA_TAR = f"llama-{LLAMA_RELEASE}-bin-ubuntu-x64.tar.gz"
 LLAMA_URL = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_RELEASE}/{LLAMA_TAR}"
 
 CACHE_DIR = Path.home() / ".cache" / "retrosyn-llama"
+SERVER_PORT = 8090
 
 SYSTEM_PROMPT = (
     "You are a retrosynthesis expert. Given a target molecule as a SMILES string, "
@@ -47,20 +52,19 @@ SYSTEM_PROMPT = (
     "Output: OC(=O)c1ccccc1O.CC(=O)OC(C)=O"
 )
 
+_server_process = None
 
-def _get_llama_binary() -> Path:
-    """Download and extract pre-built llama-cli binary + shared libs."""
-    binary = CACHE_DIR / "llama-cli"
+
+def _get_llama_binaries() -> Path:
+    """Download and extract llama-server binary + shared libs."""
+    server_bin = CACHE_DIR / "llama-server"
     libs_exist = any(CACHE_DIR.glob("*.so*")) if CACHE_DIR.exists() else False
-    if binary.exists() and libs_exist:
-        return binary
-    # Clean stale cache (binary without libs)
+    if server_bin.exists() and libs_exist:
+        return server_bin
     if CACHE_DIR.exists():
-        import shutil
-
         shutil.rmtree(CACHE_DIR)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Downloading llama.cpp binary ({LLAMA_RELEASE})...")
+    print(f"Downloading llama.cpp binaries ({LLAMA_RELEASE})...")
     tar_path = CACHE_DIR / LLAMA_TAR
     subprocess.check_call(
         ["curl", "-L", "-o", str(tar_path), LLAMA_URL],
@@ -70,14 +74,13 @@ def _get_llama_binary() -> Path:
     with tarfile.open(tar_path) as tar:
         for member in tar.getmembers():
             basename = Path(member.name).name
-            # Extract llama-cli and all shared libraries
-            if basename == "llama-cli" or basename.endswith(".so") or ".so." in basename:
+            if basename == "llama-server" or basename.endswith(".so") or ".so." in basename:
                 member.name = basename
                 tar.extract(member, CACHE_DIR)
     tar_path.unlink()
-    binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
-    print(f"llama-cli ready at {binary}")
-    return binary
+    server_bin.chmod(server_bin.stat().st_mode | stat.S_IEXEC)
+    print(f"llama-server ready at {server_bin}")
+    return server_bin
 
 
 def _get_model_path() -> Path:
@@ -88,47 +91,92 @@ def _get_model_path() -> Path:
     return Path(path)
 
 
-def _run_llama(binary: Path, model_path: Path, prompt: str, temperature: float = 0.7) -> str:
-    """Run a single inference call via llama-cli subprocess."""
-    env = {**subprocess.os.environ, "LD_LIBRARY_PATH": str(binary.parent)}
-    result = subprocess.run(
+def _ensure_server_running():
+    """Start llama-server if not already running. Model loads once, stays in memory."""
+    global _server_process
+
+    # Check if server is already responding
+    try:
+        resp = requests.get(f"http://localhost:{SERVER_PORT}/health", timeout=2)
+        if resp.ok:
+            return
+    except Exception:
+        pass
+
+    # Kill stale process if any
+    if _server_process is not None:
+        _server_process.kill()
+        _server_process = None
+
+    server_bin = _get_llama_binaries()
+    model_path = _get_model_path()
+
+    env = {**os.environ, "LD_LIBRARY_PATH": str(server_bin.parent)}
+    print(f"[llama-server] Starting on port {SERVER_PORT}...")
+    _server_process = subprocess.Popen(
         [
-            str(binary),
+            str(server_bin),
             "-m",
             str(model_path),
             "-c",
             "512",
-            "-n",
-            "128",
-            "--temp",
-            str(temperature),
-            "--top-p",
-            "0.9",
-            "-p",
-            prompt,
-            "--no-display-prompt",
             "-t",
             "2",
+            "--port",
+            str(SERVER_PORT),
+            "--host",
+            "127.0.0.1",
         ],
-        capture_output=True,
-        text=True,
-        timeout=300,
         env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
     )
-    if result.returncode != 0:
-        print(f"[llama-cli] exit code {result.returncode}")
-        print(f"[llama-cli] stderr: {result.stderr[:500]}")
-    stdout = result.stdout.strip()
-    if not stdout:
-        print(f"[llama-cli] empty stdout, stderr: {result.stderr[:500]}")
-    return stdout
+
+    # Wait for server to be ready (model loading)
+    print("[llama-server] Loading model (this takes ~60s on first request)...")
+    for i in range(180):  # up to 3 minutes for model loading
+        try:
+            resp = requests.get(f"http://localhost:{SERVER_PORT}/health", timeout=2)
+            if resp.ok:
+                print(f"[llama-server] Ready after {i + 1}s")
+                return
+        except Exception:
+            pass
+        # Check if process died
+        if _server_process.poll() is not None:
+            stderr = _server_process.stderr.read().decode()[:500]
+            _server_process = None
+            raise RuntimeError(f"llama-server exited: {stderr}")
+        time.sleep(1)
+
+    raise RuntimeError("llama-server failed to start within 180s")
+
+
+def _query_server(target_smiles: str, temperature: float = 0.7) -> str:
+    """Send a chat completion request to the local llama-server."""
+    resp = requests.post(
+        f"http://localhost:{SERVER_PORT}/v1/chat/completions",
+        json={
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"Predict the reactants for: {target_smiles}"},
+            ],
+            "max_tokens": 128,
+            "temperature": temperature,
+            "top_p": 0.9,
+        },
+        timeout=300,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"]
 
 
 def run_inference_hf(
     target_smiles: str,
     reward_calc: RewardCalculator,
     stock_list: StockList,
-    n_candidates: int = 3,
+    n_candidates: int = 1,
 ) -> dict:
     """Run retrosynthetic inference via quantized GGUF model on CPU."""
     mol = Chem.MolFromSmiles(target_smiles)
@@ -144,8 +192,7 @@ def run_inference_hf(
 
     start_time = time.time()
     try:
-        binary = _get_llama_binary()
-        model_path = _get_model_path()
+        _ensure_server_running()
     except Exception as e:
         return {
             "target": target_smiles,
@@ -157,22 +204,15 @@ def run_inference_hf(
                 "routes_found": 0,
             },
             "molecules": [],
-            "error": f"Setup error: {e}",
+            "error": f"Server error: {e}",
         }
-
-    prompt = (
-        f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
-        f"<|im_start|>user\nPredict the reactants for: {target_smiles}<|im_end|>\n"
-        f"<|im_start|>assistant\n"
-    )
 
     scored_candidates: list[tuple[float, list[str]]] = []
     for i in range(n_candidates):
         try:
             print(f"[inference] candidate {i + 1}/{n_candidates}...")
-            raw = _run_llama(binary, model_path, prompt)
+            raw = _query_server(target_smiles)
             print(f"[inference] raw output: {raw[:200]!r}")
-            # Strip thinking tags and clean up
             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
             raw = re.sub(r"<\|im_end\|>.*", "", raw).strip()
             if not raw:
@@ -248,7 +288,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="GGUF CPU retrosynthesis inference")
     parser.add_argument("--target", required=True, help="Target SMILES string")
-    parser.add_argument("--n", type=int, default=3, help="Number of candidates")
+    parser.add_argument("--n", type=int, default=1, help="Number of candidates")
     args = parser.parse_args()
 
     reward_calc = RewardCalculator()

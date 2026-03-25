@@ -575,6 +575,21 @@ def main():
             policy = get_local_policy()
         except Exception as e:
             st.sidebar.error(f"Model load failed: {e}")
+    elif backend == "RL Model (Qwen3-4B)":
+        # Pre-load the llama-server so the model is ready before the user clicks
+        if "rl_model_ready" not in st.session_state:
+            with st.spinner("Loading RL model (~60s on first start, then stays ready)..."):
+                try:
+                    from scripts.inference_hf import _ensure_server_running
+
+                    _ensure_server_running()
+                    st.session_state["rl_model_ready"] = True
+                    st.sidebar.success("RL Model loaded and ready")
+                except Exception as e:
+                    st.sidebar.error(f"RL Model failed to load: {e}")
+                    st.session_state["rl_model_ready"] = False
+        elif st.session_state.get("rl_model_ready"):
+            st.sidebar.success("RL Model loaded and ready")
 
     # ---- Input ----
     st.subheader("Input")
@@ -611,7 +626,12 @@ def main():
         elif backend == "Local Model (ReactionT5)" and policy is None:
             st.error("Local model not loaded. Check console for errors.")
         else:
-            with st.spinner("Searching for synthesis routes..."):
+            spinner_msg = (
+                "Running RL model on CPU (~1-2 min, first run loads model)..."
+                if backend == "RL Model (Qwen3-4B)"
+                else "Searching for synthesis routes..."
+            )
+            with st.spinner(spinner_msg):
                 try:
                     if backend == "RL Model (Qwen3-4B)":
                         result = run_inference_hf(
