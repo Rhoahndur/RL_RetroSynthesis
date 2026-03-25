@@ -49,10 +49,16 @@ SYSTEM_PROMPT = (
 
 
 def _get_llama_binary() -> Path:
-    """Download and extract pre-built llama-cli binary."""
+    """Download and extract pre-built llama-cli binary + shared libs."""
     binary = CACHE_DIR / "llama-cli"
-    if binary.exists():
+    libs_exist = any(CACHE_DIR.glob("*.so*")) if CACHE_DIR.exists() else False
+    if binary.exists() and libs_exist:
         return binary
+    # Clean stale cache (binary without libs)
+    if CACHE_DIR.exists():
+        import shutil
+
+        shutil.rmtree(CACHE_DIR)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     print(f"Downloading llama.cpp binary ({LLAMA_RELEASE})...")
     tar_path = CACHE_DIR / LLAMA_TAR
@@ -63,10 +69,11 @@ def _get_llama_binary() -> Path:
     )
     with tarfile.open(tar_path) as tar:
         for member in tar.getmembers():
-            if member.name.endswith("/llama-cli"):
-                member.name = "llama-cli"
+            basename = Path(member.name).name
+            # Extract llama-cli and all shared libraries
+            if basename == "llama-cli" or basename.endswith(".so") or ".so." in basename:
+                member.name = basename
                 tar.extract(member, CACHE_DIR)
-                break
     tar_path.unlink()
     binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
     print(f"llama-cli ready at {binary}")
@@ -83,6 +90,7 @@ def _get_model_path() -> Path:
 
 def _run_llama(binary: Path, model_path: Path, prompt: str, temperature: float = 0.7) -> str:
     """Run a single inference call via llama-cli subprocess."""
+    env = {**subprocess.os.environ, "LD_LIBRARY_PATH": str(binary.parent)}
     result = subprocess.run(
         [
             str(binary),
@@ -105,6 +113,7 @@ def _run_llama(binary: Path, model_path: Path, prompt: str, temperature: float =
         capture_output=True,
         text=True,
         timeout=120,
+        env=env,
     )
     if result.returncode != 0:
         print(f"[llama-cli] exit code {result.returncode}")
