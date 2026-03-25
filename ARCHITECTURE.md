@@ -11,6 +11,7 @@ graph TB
     end
 
     subgraph Inference["Inference Layer"]
+        INF_HF["inference_hf.py<br/>GGUF: llama-server + CPU"]
         INF["inference.py<br/>Local: ReactionT5 + MCTS"]
         INF_PI["inference_pi.py<br/>PI: OpenAI API + reward scoring"]
         MCTS["MCTS Engine<br/>env/MCTS.py"]
@@ -56,13 +57,26 @@ graph TB
         HFS["HuggingFace Spaces<br/>Streamlit deployment"]
     end
 
+    subgraph GGUF["GGUF Model (HF Hub)"]
+        GGUF_MODEL["rhoahndur/retrosynthesis-qwen3-4b-gguf<br/>Q4_K_M ~2.5GB"]
+        LLAMA["llama-server<br/>Persistent HTTP process<br/>port 8090"]
+    end
+
     %% User → Inference
+    ST -->|"SMILES input"| INF_HF
     ST -->|"SMILES input"| INF
+    INF_HF -->|"route tree + images"| ST
     INF -->|"route tree + images"| ST
     ST --- P3D
     ST --- RDK_DRAW
 
-    %% Inference internals
+    %% GGUF inference internals
+    INF_HF -->|"HTTP POST"| LLAMA
+    LLAMA -->|"loads model"| GGUF_MODEL
+    INF_HF -->|"score results"| REWARD
+    INF_HF -->|"check stock"| STOCK
+
+    %% Local inference internals
     INF --> MCTS
     MCTS -->|"expand nodes"| POLICY
     MCTS -->|"score nodes"| REWARD
@@ -172,6 +186,32 @@ sequenceDiagram
     I-->>U: route tree + molecule images + scores
 ```
 
+## Data Flow: Inference (RL Model / GGUF)
+
+```mermaid
+sequenceDiagram
+    participant U as User (Streamlit)
+    participant H as inference_hf.py
+    participant L as llama-server (port 8090)
+    participant R as RewardCalculator
+    participant S as StockList
+
+    Note over L: Model loaded once at app startup (~60s)
+    U->>H: target SMILES (e.g. Aspirin)
+
+    loop n_candidates
+        H->>L: POST /v1/chat/completions
+        L-->>H: reactant SMILES (dot-separated)
+        H->>H: Strip <think> tags, clean output
+        H->>R: combined_reward(target, reactants, stock)
+        R->>S: is_buyable(reactant) + nearest_similarity()
+        S-->>R: buyable / Tanimoto score
+        R-->>H: reward ∈ [0, 1]
+    end
+
+    H-->>U: route tree + molecule images + scores
+```
+
 ## MCTS Tree Structure
 
 ```mermaid
@@ -271,8 +311,12 @@ graph BT
     REWARD --> INF_PI["inference_pi.py<br/>(PI API)"]
     STOCK --> INF_PI
 
+    REWARD --> INF_HF["inference_hf.py<br/>(GGUF/llama-server)"]
+    STOCK --> INF_HF
+
     INF --> APP["Streamlit App<br/>app/main.py"]
     INF_PI --> APP
+    INF_HF --> APP
 
     REWARD --> EVAL_TK["eval_topk.py"]
     MCTS --> EVAL_MC["eval_mcts.py"]
@@ -284,14 +328,16 @@ graph BT
 
 ```mermaid
 graph LR
-    subgraph Local["MacBook Air M3"]
+    subgraph Local["Local Dev (WSL2 / macOS)"]
         DEV["VS Code / Terminal"]
         BROWSER["Browser"]
+        COLAB["Google Colab (T4 GPU)<br/>Merge LoRA + GGUF conversion"]
     end
 
     subgraph HFS["HuggingFace Spaces"]
         ST_PROD["Streamlit App<br/>2 vCPU / 16GB RAM"]
-        RT5_PROD["ReactionT5v2<br/>(preloaded)"]
+        LLAMA_PROD["llama-server<br/>GGUF Q4_K_M (~2.5GB)<br/>Persistent process, port 8090"]
+        RT5_PROD["ReactionT5v2<br/>(fallback)"]
     end
 
     subgraph PI["Prime Intellect (Managed)"]
@@ -304,16 +350,23 @@ graph LR
     subgraph HFHub["HuggingFace Hub"]
         DS["rhoahndur/retrosyn-targets<br/>USPTO-50K dataset"]
         MODEL["sagawa/ReactionT5v2<br/>Pre-trained model"]
+        GGUF_HUB["rhoahndur/retrosynthesis-qwen3-4b-gguf<br/>GGUF quantized model"]
+        MERGED["rhoahndur/retrosynthesis-qwen3-4b<br/>Merged LoRA model"]
     end
 
     DEV -->|"git push → sync-to-hf"| HFS
     BROWSER --> ST_PROD
+    ST_PROD --> LLAMA_PROD
     ST_PROD --> RT5_PROD
+    LLAMA_PROD -->|"downloads once"| GGUF_HUB
     DEV -->|"prime rl run"| PI
     ORCH --> VLLM
     ORCH --> GRPO
     VERENV -->|"loads dataset"| DS
     HFS -->|"preloads model"| MODEL
+    COLAB -->|"merge + push"| MERGED
+    COLAB -->|"quantize + push"| GGUF_HUB
+    PI -->|"LoRA adapter"| COLAB
 ```
 
 ## File Map
@@ -367,11 +420,15 @@ graph TD
         TRAIN_F["train_rl.py"]
         INF_F["inference.py"]
         INF_PI_F["inference_pi.py"]
+        INF_HF_F["inference_hf.py (GGUF/llama-server)"]
         EVAL_TK_F["eval_topk.py"]
         EVAL_MC_F["eval_mcts.py"]
         PREP_F["prepare_data.py"]
         PREP_PI_F["prepare_pi_dataset.py"]
         PREP_STOCK_F["prepare_stock.py"]
+        MERGE_F["merge_and_push.py"]
+        MERGE_COLAB_F["merge_colab.py"]
+        CONVERT_F["convert_gguf_colab.py"]
         SETUP_F["setup_prime.sh"]
     end
 
