@@ -9,6 +9,7 @@ python_version: "3.10"
 app_file: app/main.py
 pinned: false
 models:
+  - rhoahndur/retrosynthesis-qwen3-4b-gguf
   - sagawa/ReactionT5v2-retrosynthesis
 datasets:
   - rhoahndur/retrosyn-targets
@@ -32,9 +33,10 @@ RL-powered retrosynthetic route prediction. Given a target molecule as a SMILES 
 3. **Scoring**: Multi-component rewards evaluate validity, synthetic accessibility, and stock availability
 4. **Output**: Ranked synthesis routes with molecule visualizations and buyability indicators
 
-The system supports two inference backends:
-- **Prime Intellect API** (primary) — RL-trained Qwen3-4B LoRA adapter via OpenAI-compatible endpoint
-- **Local ReactionT5** (fallback) — `sagawa/ReactionT5v2-retrosynthesis` with MCTS
+The system supports three inference backends:
+- **RL Model (Qwen3-4B)** (default) — GRPO-trained Qwen3-4B, quantized to GGUF Q4_K_M, served via llama-server on CPU
+- **Local ReactionT5** — `sagawa/ReactionT5v2-retrosynthesis` with MCTS
+- **Prime Intellect API** — RL-trained Qwen3-4B LoRA adapter via OpenAI-compatible endpoint (requires API key)
 
 ## Project Structure
 
@@ -73,13 +75,18 @@ The system supports two inference backends:
 ├── scripts/
 │   ├── inference.py                 # Local MCTS inference
 │   ├── inference_pi.py              # Prime Intellect API inference
+│   ├── inference_hf.py              # GGUF CPU inference via llama-server
 │   ├── train_rl.py                  # REINFORCE training loop (GRPO-style)
 │   ├── eval_topk.py                 # Top-K exact match evaluation
 │   ├── eval_mcts.py                 # MCTS full-route success rate evaluation
 │   ├── prepare_data.py              # Download/process USPTO-50K via TDC
 │   ├── prepare_pi_dataset.py        # Format dataset for HuggingFace Hub upload
 │   ├── prepare_stock.py             # Download/canonicalize ASKCOS buyables
+│   ├── merge_and_push.py            # Push LoRA adapter to HuggingFace Hub
+│   ├── merge_colab.py               # Colab: merge LoRA into base model + push
+│   ├── convert_gguf_colab.py        # Colab: convert merged model to GGUF + push
 │   └── setup_prime.sh               # Prime Intellect pod provisioning script
+├── .pre-commit-config.yaml          # Pre-commit hooks (ruff check + format)
 └── tests/                           # 100 unit tests
 ```
 
@@ -111,12 +118,15 @@ The app launches with preset buttons for four demo molecules:
 | Caffeine | `Cn1c(=O)c2c(ncn2C)n(C)c1=O` |
 | Ibuprofen | `CC(C)Cc1ccc(cc1)C(C)C(=O)O` |
 
-Select "Prime Intellect API" in the sidebar and provide your API key to use the RL-trained model, or select "Local Model (ReactionT5)" to run inference locally.
+The default backend is "RL Model (Qwen3-4B)" which runs the GRPO-trained model on CPU via llama-server (first load takes ~60s). Select "Local Model (ReactionT5)" for local MCTS inference, or "Prime Intellect API" with an API key for hosted inference.
 
 ### Run Inference from CLI
 
 ```bash
-# Local model
+# RL Model (GGUF on CPU — starts llama-server, first call loads model ~60s)
+python scripts/inference_hf.py --target "CC(=O)Oc1ccccc1C(=O)O"
+
+# Local model (ReactionT5 + MCTS)
 python scripts/inference.py --target "CC(=O)Oc1ccccc1C(=O)O"
 
 # Prime Intellect API
@@ -179,7 +189,24 @@ prime rl run configs/rl/retrosynthesis-full.toml
 prime rl logs <run-id> -f
 ```
 
-After training, deploy the LoRA adapter:
+After training, deploy the LoRA adapter to HuggingFace Spaces:
+
+```bash
+# 1. Download adapter weights from PI dashboard (.zip)
+
+# 2. Push adapter to HuggingFace Hub
+python scripts/merge_and_push.py --adapter_path models/lora_adapter --repo rhoahndur/retrosynthesis-qwen3-4b
+
+# 3. Merge LoRA into base model on Google Colab (needs GPU, ~16GB)
+#    Run scripts/merge_colab.py in a Colab T4 notebook
+
+# 4. Quantize to GGUF on Colab
+#    Run scripts/convert_gguf_colab.py — produces Q4_K_M (~2.5GB)
+
+# 5. HF Spaces auto-deploys via llama-server (CPU inference, no GPU needed)
+```
+
+Alternatively, deploy as a PI inference endpoint (requires PI credits):
 
 ```bash
 prime deployments create <adapter-id>
@@ -230,6 +257,7 @@ GitHub Actions runs lint, fast tests, HuggingFace dataset verification, and eval
 - **MCTS** (`env/MCTS.py`) — Full Monte Carlo Tree Search with UCT selection, policy-guided expansion, reward-based simulation, backpropagation, and cycle detection. Finds multi-step routes to buyable starting materials.
 - **ChemEnv** (`env/ChemEnv.py`) — Gym-style wrapper combining policy, rewards, and stock list into a step-based interface for episodic RL.
 - **Verifiers Environment** (`environments/retrosynthesis/`) — Self-contained `vf.SingleTurnEnv` package for Prime Intellect hosted RL training. Loads USPTO-50K from HuggingFace Hub (`rhoahndur/retrosyn-targets`), falls back to 24 inline demo molecules. 6-component async RDKit reward rubric with ~204k bundled ASKCOS buyables, real Ertl-Schuffenhauer SA scoring, and bidirectional atom conservation.
+- **GGUF Inference** (`scripts/inference_hf.py`) — Downloads pre-built `llama-server` binary and GGUF model from HuggingFace Hub. Runs a persistent llama-server process that loads the model once into memory and serves requests via an OpenAI-compatible HTTP API on port 8090. No GPU, no compilation, no API key needed.
 - **eval_topk** (`scripts/eval_topk.py`) — Top-K exact match evaluation against ground-truth reactions, stratified by SA score difficulty (easy/medium/hard) with reaction type breakdown and blind spot flagging.
 - **eval_mcts** (`scripts/eval_mcts.py`) — MCTS full-route success rate evaluation measuring how often complete synthesis routes (all leaves buyable) are found.
 
@@ -237,18 +265,19 @@ GitHub Actions runs lint, fast tests, HuggingFace dataset verification, and eval
 
 | Component | Technology |
 |---|---|
-| Retrosynthesis model | ReactionT5v2 (local) / Qwen3-4B (PI) |
-| RL algorithm | REINFORCE (local) / GRPO (PI) |
+| Retrosynthesis model | Qwen3-4B GGUF (default) / ReactionT5v2 (local) / Qwen3-4B LoRA (PI) |
+| RL algorithm | GRPO (PI) / REINFORCE (local) |
+| CPU inference | llama-server (llama.cpp) serving GGUF Q4_K_M quantization |
 | Chemistry engine | RDKit + vendored SA scorer (Ertl-Schuffenhauer) |
 | Stock data | ASKCOS buyables (~204k compounds) |
 | Training data | USPTO-50K via TDC |
-| Training platform | Prime Intellect |
+| Training platform | Prime Intellect (free GRPO training) |
+| Model pipeline | LoRA merge (Colab) → GGUF quantization (Colab) → llama-server (HF Spaces) |
 | Frontend | Streamlit + py3Dmol |
-| Inference API | OpenAI-compatible (Prime Intellect) |
 | CI/CD | GitHub Actions + ruff + pytest |
-| Deployment | HuggingFace Spaces (auto-deploy from GitHub) |
+| Deployment | HuggingFace Spaces (auto-deploy from GitHub, 2 vCPU / 16GB RAM) |
 | Linting | Ruff |
-| Pre-commit | ruff check + ruff format |
+| Pre-commit | ruff check + ruff format (via .pre-commit-config.yaml) |
 
 ## License
 
