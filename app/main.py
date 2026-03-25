@@ -618,6 +618,7 @@ def main():
                             smiles,
                             reward_calc,
                             stock_list,
+                            n_candidates=1,
                         )
                     elif backend == "Prime Intellect API":
                         client = create_pi_client(api_key=pi_api_key)

@@ -99,7 +99,7 @@ def _run_llama(binary: Path, model_path: Path, prompt: str, temperature: float =
             "-c",
             "512",
             "-n",
-            "256",
+            "128",
             "--temp",
             str(temperature),
             "--top-p",
@@ -112,7 +112,7 @@ def _run_llama(binary: Path, model_path: Path, prompt: str, temperature: float =
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=300,
         env=env,
     )
     if result.returncode != 0:
