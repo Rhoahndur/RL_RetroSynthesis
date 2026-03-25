@@ -28,7 +28,7 @@ from scripts.inference import mol_to_base64_image
 
 GGUF_REPO = "rhoahndur/retrosynthesis-qwen3-4b-gguf"
 GGUF_FILE = "retrosynthesis-qwen3-4b-Q4_K_M.gguf"
-LLAMA_RELEASE = "b5560"
+LLAMA_RELEASE = "b8508"
 LLAMA_TAR = f"llama-{LLAMA_RELEASE}-bin-ubuntu-x64.tar.gz"
 LLAMA_URL = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_RELEASE}/{LLAMA_TAR}"
 
