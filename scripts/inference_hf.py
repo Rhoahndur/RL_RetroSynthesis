@@ -106,7 +106,13 @@ def _run_llama(binary: Path, model_path: Path, prompt: str, temperature: float =
         text=True,
         timeout=120,
     )
-    return result.stdout.strip()
+    if result.returncode != 0:
+        print(f"[llama-cli] exit code {result.returncode}")
+        print(f"[llama-cli] stderr: {result.stderr[:500]}")
+    stdout = result.stdout.strip()
+    if not stdout:
+        print(f"[llama-cli] empty stdout, stderr: {result.stderr[:500]}")
+    return stdout
 
 
 def run_inference_hf(
@@ -152,20 +158,25 @@ def run_inference_hf(
     )
 
     scored_candidates: list[tuple[float, list[str]]] = []
-    for _ in range(n_candidates):
+    for i in range(n_candidates):
         try:
+            print(f"[inference] candidate {i + 1}/{n_candidates}...")
             raw = _run_llama(binary, model_path, prompt)
+            print(f"[inference] raw output: {raw[:200]!r}")
             # Strip thinking tags and clean up
             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
             raw = re.sub(r"<\|im_end\|>.*", "", raw).strip()
             if not raw:
+                print("[inference] empty after cleanup, skipping")
                 continue
             reactants = [r.strip() for r in raw.split(".") if r.strip()]
             if not reactants:
                 continue
             reward = reward_calc.combined_reward(target_smiles, reactants, stock_list)
+            print(f"[inference] reactants={reactants}, reward={reward:.3f}")
             scored_candidates.append((reward, reactants))
-        except Exception:
+        except Exception as e:
+            print(f"[inference] error: {e}")
             continue
 
     elapsed = time.time() - start_time
