@@ -4,17 +4,17 @@ Steps:
   1. Go to https://colab.research.google.com
   2. Runtime → Change runtime type → T4 GPU
   3. Paste this into a cell
-  4. Update HF_TOKEN
+  4. Add HF_TOKEN as a Colab secret or environment variable
   5. Run (~15 min)
 """
 
 # ---- CONFIG ----
-HF_TOKEN = "hf_YOUR_TOKEN_HERE"
 MODEL_REPO = "rhoahndur/retrosynthesis-qwen3-4b"  # merged model
 GGUF_REPO = "rhoahndur/retrosynthesis-qwen3-4b-gguf"  # where GGUF goes
 QUANT = "Q4_K_M"  # good balance of quality vs size
 # ---- END CONFIG ----
 
+import os
 import subprocess
 
 # Install llama.cpp conversion tools
@@ -22,8 +22,6 @@ subprocess.check_call(["pip", "install", "-q", "huggingface_hub"])
 subprocess.check_call(["pip", "install", "-q", "gguf", "numpy", "sentencepiece", "transformers"])
 
 # Clone llama.cpp for the conversion script
-import os
-
 if not os.path.exists("llama.cpp"):
     subprocess.check_call(["git", "clone", "--depth", "1", "https://github.com/ggml-org/llama.cpp"])
     # Build quantize tool
@@ -45,6 +43,27 @@ if not os.path.exists("llama.cpp"):
     )
 
 from huggingface_hub import HfApi, snapshot_download
+
+
+def get_hf_token() -> str:
+    """Read the Hugging Face write token from runtime secrets, not source code."""
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        return token
+
+    try:
+        from google.colab import userdata
+
+        token = userdata.get("HF_TOKEN")
+    except Exception:
+        token = None
+
+    if token:
+        return token
+    raise RuntimeError("Set HF_TOKEN as an environment variable or Colab secret before running.")
+
+
+HF_TOKEN = get_hf_token()
 
 # Download the merged model
 print("[1/4] Downloading merged model...")
