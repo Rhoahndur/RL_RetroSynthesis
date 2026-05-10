@@ -8,6 +8,7 @@ Usage:
     result = run_inference_hf("CC(=O)Oc1ccccc1C(=O)O", reward_calc, stock)
 """
 
+import hashlib
 import json
 import os
 import re
@@ -35,9 +36,14 @@ GGUF_FILE = "retrosynthesis-qwen3-4b-Q4_K_M.gguf"
 LLAMA_RELEASE = "b8508"
 LLAMA_TAR = f"llama-{LLAMA_RELEASE}-bin-ubuntu-x64.tar.gz"
 LLAMA_URL = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_RELEASE}/{LLAMA_TAR}"
+# From GitHub release asset metadata for ggml-org/llama.cpp b8508.
+LLAMA_TAR_SHA256 = "81019838f1c394c97e593932d3f8a3dc4b924991734af587a52b1dada57fc8e1"
 
 CACHE_DIR = Path.home() / ".cache" / "retrosyn-llama"
 SERVER_PORT = 8090
+DOWNLOAD_TIMEOUT_SECONDS = int(os.environ.get("RETROSYN_DOWNLOAD_TIMEOUT_SECONDS", "180"))
+SERVER_STARTUP_TIMEOUT_SECONDS = int(os.environ.get("RETROSYN_LLAMA_STARTUP_TIMEOUT_SECONDS", "180"))
+QUERY_TIMEOUT_SECONDS = int(os.environ.get("RETROSYN_LLAMA_QUERY_TIMEOUT_SECONDS", "180"))
 
 SYSTEM_PROMPT = (
     "You are a retrosynthesis expert. Given a target molecule as a SMILES string, "
@@ -55,29 +61,81 @@ SYSTEM_PROMPT = (
 _server_process = None
 
 
-def _get_llama_binaries() -> Path:
-    """Download and extract llama-server binary + shared libs."""
-    server_bin = CACHE_DIR / "llama-server"
+def _verified_cache_marker() -> Path:
+    """Path to the checksum marker for the currently pinned llama.cpp artifact."""
+    return CACHE_DIR / f"{LLAMA_TAR}.sha256"
+
+
+def _cache_is_verified(server_bin: Path) -> bool:
+    """Return True only when cached binaries came from the expected archive."""
     libs_exist = any(CACHE_DIR.glob("*.so*")) if CACHE_DIR.exists() else False
-    if server_bin.exists() and libs_exist:
+    marker = _verified_cache_marker()
+    if not server_bin.exists() or not libs_exist or not marker.exists():
+        return False
+    try:
+        return marker.read_text().strip() == LLAMA_TAR_SHA256
+    except OSError:
+        return False
+
+
+def _download_verified_archive(tar_path: Path) -> None:
+    """Download the llama.cpp release archive and verify its SHA-256 digest."""
+    print(f"Downloading llama.cpp binaries ({LLAMA_RELEASE})...")
+    digest = hashlib.sha256()
+    with requests.get(LLAMA_URL, stream=True, timeout=DOWNLOAD_TIMEOUT_SECONDS) as resp:
+        resp.raise_for_status()
+        with open(tar_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                if not chunk:
+                    continue
+                digest.update(chunk)
+                f.write(chunk)
+
+    actual = digest.hexdigest()
+    if actual != LLAMA_TAR_SHA256:
+        try:
+            tar_path.unlink()
+        except OSError:
+            pass
+        raise RuntimeError(
+            f"Checksum mismatch for {LLAMA_TAR}: expected {LLAMA_TAR_SHA256}, got {actual}"
+        )
+
+
+def _extract_llama_artifacts(tar_path: Path) -> None:
+    """Extract only the llama-server binary and shared libraries."""
+    with tarfile.open(tar_path) as tar:
+        for member in tar.getmembers():
+            basename = Path(member.name).name
+            if member.isdir() or not (
+                basename == "llama-server" or basename.endswith(".so") or ".so." in basename
+            ):
+                continue
+
+            src = tar.extractfile(member)
+            if src is None:
+                continue
+            dest = CACHE_DIR / basename
+            with src, open(dest, "wb") as out:
+                shutil.copyfileobj(src, out)
+
+
+def _get_llama_binaries() -> Path:
+    """Download, verify, and extract llama-server binary + shared libs."""
+    server_bin = CACHE_DIR / "llama-server"
+    if _cache_is_verified(server_bin):
         return server_bin
     if CACHE_DIR.exists():
         shutil.rmtree(CACHE_DIR)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Downloading llama.cpp binaries ({LLAMA_RELEASE})...")
+
     tar_path = CACHE_DIR / LLAMA_TAR
-    subprocess.check_call(
-        ["curl", "-L", "-o", str(tar_path), LLAMA_URL],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    with tarfile.open(tar_path) as tar:
-        for member in tar.getmembers():
-            basename = Path(member.name).name
-            if basename == "llama-server" or basename.endswith(".so") or ".so." in basename:
-                member.name = basename
-                tar.extract(member, CACHE_DIR)
+    _download_verified_archive(tar_path)
+    _extract_llama_artifacts(tar_path)
     tar_path.unlink()
+    _verified_cache_marker().write_text(LLAMA_TAR_SHA256)
+    if not server_bin.exists():
+        raise RuntimeError(f"Verified archive did not contain {server_bin.name}")
     server_bin.chmod(server_bin.stat().st_mode | stat.S_IEXEC)
     print(f"llama-server ready at {server_bin}")
     return server_bin
@@ -134,7 +192,7 @@ def _ensure_server_running():
 
     # Wait for server to be ready (model loading)
     print("[llama-server] Loading model (this takes ~60s on first request)...")
-    for i in range(180):  # up to 3 minutes for model loading
+    for i in range(SERVER_STARTUP_TIMEOUT_SECONDS):
         try:
             resp = requests.get(f"http://localhost:{SERVER_PORT}/health", timeout=2)
             if resp.ok:
@@ -149,7 +207,7 @@ def _ensure_server_running():
             raise RuntimeError(f"llama-server exited: {stderr}")
         time.sleep(1)
 
-    raise RuntimeError("llama-server failed to start within 180s")
+    raise RuntimeError(f"llama-server failed to start within {SERVER_STARTUP_TIMEOUT_SECONDS}s")
 
 
 def _query_server(target_smiles: str, temperature: float = 0.7) -> str:
@@ -165,7 +223,7 @@ def _query_server(target_smiles: str, temperature: float = 0.7) -> str:
             "temperature": temperature,
             "top_p": 0.9,
         },
-        timeout=300,
+        timeout=QUERY_TIMEOUT_SECONDS,
     )
     resp.raise_for_status()
     data = resp.json()
