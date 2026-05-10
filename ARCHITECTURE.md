@@ -121,6 +121,22 @@ graph TB
     PI -.->|"SSH tunnel"| ST
 ```
 
+## Runtime Boundaries
+
+The repository contains two related but distinct runtime surfaces:
+
+- **Public demo application**: `app/main.py` is the Streamlit UI. It can call the GGUF-backed Qwen route through `scripts/inference_hf.py`, the local ReactionT5/MCTS route through `scripts/inference.py`, or the Prime Intellect API route through `scripts/inference_pi.py`.
+- **Local research stack**: `models/policy.py`, `env/MCTS.py`, `env/Rewards.py`, `env/ChemEnv.py`, and `data/stock/loader.py` provide the reusable model/search/reward/stock components used by scripts and tests.
+- **Prime/Verifiers environment**: `environments/retrosynthesis/retrosynthesis.py` is a self-contained `vf.SingleTurnEnv` package with inline reward logic and bundled stock data for `prime env install`, `prime eval run`, and `prime env push`.
+- **Deployment/model pipeline**: Colab helper scripts merge a Prime-trained LoRA adapter, convert it to GGUF, push model artifacts to Hugging Face Hub, and let Hugging Face Spaces run CPU inference via `llama-server`.
+
+## Operational Controls
+
+- `scripts/inference_hf.py` pins the llama.cpp `b8508` Ubuntu x64 archive and verifies its SHA-256 digest before extracting `llama-server`.
+- `app/main.py` applies public-demo limits for SMILES length, molecule heavy atom count, per-session cooldown, single-flight inference locking, queue wait time, MCTS simulation count, and request timeouts.
+- Hugging Face write credentials are read from `HF_TOKEN` environment variables or Colab secrets in the model-publishing scripts; tokens should never be committed.
+- Project source licensing is in `LICENSE`; third-party model, data, and chemistry utility notes are in `THIRD_PARTY_NOTICES.md`.
+
 ## Data Flow: Training
 
 ```mermaid
@@ -210,6 +226,34 @@ sequenceDiagram
     end
 
     H-->>U: route tree + molecule images + scores
+```
+
+## Data Flow: Prime / Verifiers Environment
+
+```mermaid
+sequenceDiagram
+    participant CLI as Prime CLI
+    participant ENV as environments/retrosynthesis
+    participant DS as Dataset Builder
+    participant M as Model
+    participant R as Verifiers Rubric
+    participant RD as RDKit + SA Scorer
+    participant ST as Bundled Stock Data
+
+    CLI->>ENV: load_environment(split, difficulty)
+    ENV->>DS: build_dataset(train/test)
+    DS-->>ENV: HF dataset rows or inline fallback
+    ENV->>R: build_rubric()
+    ENV-->>CLI: vf.SingleTurnEnv
+
+    loop Each rollout
+        CLI->>M: Prompt target product SMILES
+        M-->>CLI: Dot-separated reactant SMILES
+        CLI->>R: Score completion
+        R->>RD: Validate, sanitize, SA score, atom counts
+        R->>ST: Exact stock match + Tanimoto soft match
+        R-->>CLI: Weighted reward
+    end
 ```
 
 ## MCTS Tree Structure
@@ -373,11 +417,15 @@ graph LR
 
 ```mermaid
 graph TD
-    subgraph Root["/retrosyn-rl"]
+    subgraph Root["/RL_RetroSynthesis"]
+        README["README.md"]
+        REPORT["REPORT.md"]
+        LICENSE_F["LICENSE"]
+        NOTICES["THIRD_PARTY_NOTICES.md"]
         REQ["requirements.txt"]
-        PLAN["PLAN.md"]
-        TASKS["TASKS.md"]
         ARCH["ARCHITECTURE.md"]
+        PYPROJ["pyproject.toml"]
+        MAKE["Makefile"]
     end
 
     subgraph data["data/"]
@@ -432,8 +480,31 @@ graph TD
         SETUP_F["setup_prime.sh"]
     end
 
+    subgraph configs["configs/"]
+        ENDPOINTS["endpoints.toml"]
+        RL_CFG["rl/retrosynthesis*.toml"]
+        EVAL_CFG["eval/*.toml"]
+        GEPA_CFG["gepa/*.toml"]
+    end
+
+    subgraph environments["environments/"]
+        ENV_AGENTS["AGENTS.md"]
+        subgraph vf_env["retrosynthesis/"]
+            VF_PY["retrosynthesis.py -> load_environment"]
+            VF_PROJ["pyproject.toml"]
+            VF_README["README.md"]
+            VF_STOCK["data/buyables.smi.gz"]
+            VF_SA["sascorer.py + fpscores.pkl.gz"]
+        end
+    end
+
     subgraph app["app/"]
         MAIN_F["main.py (Streamlit)"]
+    end
+
+    subgraph github[".github/workflows/"]
+        CI["ci.yml"]
+        HF_SYNC["sync-to-hf.yml"]
     end
 
     subgraph tests["tests/ (100 tests)"]
