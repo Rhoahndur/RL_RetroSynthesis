@@ -8,18 +8,18 @@ Steps:
   2. Create a new notebook
   3. Runtime → Change runtime type → T4 GPU
   4. Paste this entire script into a cell
-  5. Update HF_TOKEN below
+  5. Add HF_TOKEN as a Colab secret or environment variable
   6. Run the cell (~10 min)
 """
 
 # ---- CONFIG (edit these) ----
-HF_TOKEN = "hf_YOUR_TOKEN_HERE"  # <-- paste your HF write token
 REPO_ID = "rhoahndur/retrosynthesis-qwen3-4b"
 ADAPTER_REPO = "rhoahndur/retrosynthesis-qwen3-4b"  # where adapter currently lives
 BASE_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 # ---- END CONFIG ----
 
 # Install dependencies
+import os
 import subprocess
 
 subprocess.check_call(
@@ -32,6 +32,27 @@ import torch
 from huggingface_hub import HfApi, snapshot_download
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+
+def get_hf_token() -> str:
+    """Read the Hugging Face write token from runtime secrets, not source code."""
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        return token
+
+    try:
+        from google.colab import userdata
+
+        token = userdata.get("HF_TOKEN")
+    except Exception:
+        token = None
+
+    if token:
+        return token
+    raise RuntimeError("Set HF_TOKEN as an environment variable or Colab secret before running.")
+
+
+HF_TOKEN = get_hf_token()
 
 # Check GPU availability
 if torch.cuda.is_available():
