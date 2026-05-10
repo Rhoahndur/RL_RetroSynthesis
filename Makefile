@@ -1,8 +1,11 @@
+PYTHON ?= python3
+PIP ?= $(PYTHON) -m pip
+
 .PHONY: install lint lint-fix test test-fast test-all clean
 
 install:
-	pip install -r requirements.txt
-	pip install pytest ruff
+	$(PIP) install -r requirements.txt
+	$(PIP) install pytest ruff
 
 lint:
 	ruff check .
@@ -12,13 +15,13 @@ lint-fix:
 	ruff format .
 
 test:
-	python -m pytest tests/ -m "not slow"
+	$(PYTHON) -m pytest tests/ -m "not slow"
 
 test-fast:
-	python -m pytest tests/ -m "not slow" -x --tb=short
+	$(PYTHON) -m pytest tests/ -m "not slow" -x --tb=short
 
 test-all:
-	python -m pytest tests/
+	$(PYTHON) -m pytest tests/
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
