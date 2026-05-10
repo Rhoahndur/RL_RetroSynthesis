@@ -8,14 +8,20 @@ Usage:
 """
 
 import os
+import re
 import sys
+import time
 import traceback
+from contextlib import contextmanager
 from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import re
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - HuggingFace Spaces runs Linux.
+    fcntl = None
 
 import streamlit as st
 from rdkit import Chem
@@ -46,6 +52,96 @@ PRESETS = {
     "Caffeine": "Cn1c(=O)c2c(ncn2C)n(C)c1=O",
     "Aspirin": "CC(=O)Oc1ccccc1C(=O)O",
 }
+
+
+def _env_int(name: str, default: int, min_value: int, max_value: int) -> int:
+    """Read a bounded integer setting from the environment."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(min_value, min(max_value, value))
+
+
+MAX_SMILES_CHARS = _env_int("RETROSYN_MAX_SMILES_CHARS", 256, 16, 2048)
+MAX_HEAVY_ATOMS = _env_int("RETROSYN_MAX_HEAVY_ATOMS", 80, 1, 250)
+MIN_SECONDS_BETWEEN_RUNS = _env_int("RETROSYN_MIN_SECONDS_BETWEEN_RUNS", 15, 0, 3600)
+QUEUE_WAIT_SECONDS = _env_int("RETROSYN_QUEUE_WAIT_SECONDS", 5, 0, 120)
+LOCAL_TIME_BUDGET_SECONDS = _env_int("RETROSYN_LOCAL_TIME_BUDGET_SECONDS", 30, 5, 120)
+LOCAL_MAX_SIMULATIONS = _env_int("RETROSYN_LOCAL_MAX_SIMULATIONS", 200, 1, 1000)
+HF_N_CANDIDATES = _env_int("RETROSYN_HF_N_CANDIDATES", 1, 1, 3)
+INFERENCE_LOCK_PATH = os.environ.get("RETROSYN_INFERENCE_LOCK_PATH", "/tmp/retrosyn_inference.lock")
+PRELOAD_RL_MODEL = os.environ.get("RETROSYN_PRELOAD_RL_MODEL", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+
+
+def validate_resource_limits(smiles: str) -> tuple[bool, str]:
+    """Apply public-demo input limits before starting model inference."""
+    if len(smiles) > MAX_SMILES_CHARS:
+        return False, f"SMILES is too long for this demo ({len(smiles)} > {MAX_SMILES_CHARS})."
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return True, ""
+
+    heavy_atoms = mol.GetNumHeavyAtoms()
+    if heavy_atoms > MAX_HEAVY_ATOMS:
+        return False, (
+            f"Molecule is too large for this demo ({heavy_atoms} heavy atoms > "
+            f"{MAX_HEAVY_ATOMS})."
+        )
+    return True, ""
+
+
+def check_session_rate_limit() -> tuple[bool, str]:
+    """Limit repeated inference clicks from one Streamlit session."""
+    if MIN_SECONDS_BETWEEN_RUNS <= 0:
+        return True, ""
+    now = time.time()
+    last_started = st.session_state.get("last_inference_started_at")
+    if last_started is None:
+        st.session_state["last_inference_started_at"] = now
+        return True, ""
+
+    elapsed = now - last_started
+    if elapsed < MIN_SECONDS_BETWEEN_RUNS:
+        remaining = int(MIN_SECONDS_BETWEEN_RUNS - elapsed) + 1
+        return False, f"Please wait {remaining}s before starting another inference run."
+
+    st.session_state["last_inference_started_at"] = now
+    return True, ""
+
+
+@contextmanager
+def inference_slot(wait_seconds: int = QUEUE_WAIT_SECONDS):
+    """Allow one expensive inference run at a time per app container."""
+    if fcntl is None:
+        yield True
+        return
+
+    Path(INFERENCE_LOCK_PATH).parent.mkdir(parents=True, exist_ok=True)
+    with open(INFERENCE_LOCK_PATH, "w") as lock_file:
+        deadline = time.time() + wait_seconds
+        while True:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.time() >= deadline:
+                    yield False
+                    return
+                time.sleep(0.5)
+
+        try:
+            yield True
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 # ---- Cached resource loaders ----
@@ -576,8 +672,7 @@ def main():
         except Exception as e:
             st.sidebar.error(f"Model load failed: {e}")
     elif backend == "RL Model (Qwen3-4B)":
-        # Pre-load the llama-server so the model is ready before the user clicks
-        if "rl_model_ready" not in st.session_state:
+        if PRELOAD_RL_MODEL and "rl_model_ready" not in st.session_state:
             with st.spinner("Loading RL model (~60s on first start, then stays ready)..."):
                 try:
                     from scripts.inference_hf import _ensure_server_running
@@ -590,6 +685,8 @@ def main():
                     st.session_state["rl_model_ready"] = False
         elif st.session_state.get("rl_model_ready"):
             st.sidebar.success("RL Model loaded and ready")
+        else:
+            st.sidebar.info("RL Model loads on the first search.")
 
     # ---- Input ----
     st.subheader("Input")
@@ -613,6 +710,11 @@ def main():
         st.info("Enter a SMILES string above or click a preset to get started.")
         st.stop()
 
+    within_limits, limit_msg = validate_resource_limits(smiles)
+    if not within_limits:
+        st.error(limit_msg)
+        st.stop()
+
     # ---- Target display ----
     valid = display_target_molecule(smiles, reward_calc, stock_list)
     if not valid:
@@ -626,39 +728,47 @@ def main():
         elif backend == "Local Model (ReactionT5)" and policy is None:
             st.error("Local model not loaded. Check console for errors.")
         else:
-            spinner_msg = (
-                "Running RL model on CPU (~1-2 min, first run loads model)..."
-                if backend == "RL Model (Qwen3-4B)"
-                else "Searching for synthesis routes..."
-            )
-            with st.spinner(spinner_msg):
-                try:
-                    if backend == "RL Model (Qwen3-4B)":
-                        result = run_inference_hf(
-                            smiles,
-                            reward_calc,
-                            stock_list,
-                            n_candidates=1,
-                        )
-                    elif backend == "Prime Intellect API":
-                        client = create_pi_client(api_key=pi_api_key)
-                        result = run_inference_pi(
-                            smiles, client, pi_model_id, reward_calc, stock_list
-                        )
+            rate_ok, rate_msg = check_session_rate_limit()
+            if not rate_ok:
+                st.warning(rate_msg)
+            else:
+                with inference_slot() as acquired:
+                    if not acquired:
+                        st.warning("Inference is busy. Try again in a moment.")
                     else:
-                        result = run_inference(
-                            smiles,
-                            policy,
-                            reward_calc,
-                            stock_list,
-                            max_simulations=200,
-                            time_budget=30,
+                        spinner_msg = (
+                            "Running RL model on CPU (~1-2 min, first run loads model)..."
+                            if backend == "RL Model (Qwen3-4B)"
+                            else "Searching for synthesis routes..."
                         )
-                    st.session_state["search_result"] = result
-                    st.session_state["search_smiles"] = smiles
-                except Exception as e:
-                    st.error(f"Search failed: {e}")
-                    st.code(traceback.format_exc())
+                        with st.spinner(spinner_msg):
+                            try:
+                                if backend == "RL Model (Qwen3-4B)":
+                                    result = run_inference_hf(
+                                        smiles,
+                                        reward_calc,
+                                        stock_list,
+                                        n_candidates=HF_N_CANDIDATES,
+                                    )
+                                elif backend == "Prime Intellect API":
+                                    client = create_pi_client(api_key=pi_api_key)
+                                    result = run_inference_pi(
+                                        smiles, client, pi_model_id, reward_calc, stock_list
+                                    )
+                                else:
+                                    result = run_inference(
+                                        smiles,
+                                        policy,
+                                        reward_calc,
+                                        stock_list,
+                                        max_simulations=LOCAL_MAX_SIMULATIONS,
+                                        time_budget=LOCAL_TIME_BUDGET_SECONDS,
+                                    )
+                                st.session_state["search_result"] = result
+                                st.session_state["search_smiles"] = smiles
+                            except Exception as e:
+                                st.error(f"Search failed: {e}")
+                                st.code(traceback.format_exc())
 
     # ---- Display persisted results ----
     if "search_result" in st.session_state and st.session_state.get("search_smiles") == smiles:
