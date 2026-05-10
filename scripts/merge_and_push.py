@@ -7,6 +7,9 @@ If you have enough RAM (~16GB free), use --merge to merge the adapter into
 the base model first, which makes inference faster on the Hub.
 
 Usage:
+    # Authenticate via environment variable or `huggingface-cli login`
+    export HF_TOKEN="your-hf-token"
+
     # Push adapter as-is (works on any machine)
     python scripts/merge_and_push.py
 
@@ -18,6 +21,7 @@ Usage:
 """
 
 import argparse
+import os
 from pathlib import Path
 
 from huggingface_hub import HfApi
@@ -25,7 +29,7 @@ from huggingface_hub import HfApi
 
 def push_adapter(adapter_path: Path, repo_id: str):
     """Push LoRA adapter directly to Hub (lightweight, works on any machine)."""
-    api = HfApi()
+    api = HfApi(token=os.environ.get("HF_TOKEN"))
     api.create_repo(repo_id, exist_ok=True)
 
     # Upload adapter files
@@ -117,7 +121,7 @@ def merge_and_push(adapter_path: Path, repo_id: str):
     print(f"    Saved: {total_bytes / 1e9:.1f} GB")
 
     print(f"[4/4] Pushing to {repo_id}...")
-    api = HfApi()
+    api = HfApi(token=os.environ.get("HF_TOKEN"))
     api.create_repo(repo_id, exist_ok=True)
     api.upload_folder(
         folder_path=str(output_dir),
