@@ -103,6 +103,14 @@ The system supports three inference backends:
 pip install -r requirements.txt
 ```
 
+`requirements.txt` is the canonical app/demo install path and uses bounded
+runtime dependency ranges. Editable installs are also supported:
+
+```bash
+pip install -e .
+pip install -e ".[dev,model-tools]"  # tests/linting plus LoRA merge helpers
+```
+
 ### Run the Streamlit App
 
 ```bash
@@ -119,6 +127,22 @@ The app launches with preset buttons for four demo molecules:
 | Ibuprofen | `CC(C)Cc1ccc(cc1)C(C)C(=O)O` |
 
 The default backend is "RL Model (Qwen3-4B)" which runs the GRPO-trained model on CPU via llama-server (first load takes ~60s). Select "Local Model (ReactionT5)" for local MCTS inference, or "Prime Intellect API" with an API key for hosted inference.
+
+### Public Demo Resource Controls
+
+The Streamlit app enforces lightweight limits before starting expensive inference:
+
+| Environment variable | Default | Purpose |
+|---|---:|---|
+| `RETROSYN_MAX_SMILES_CHARS` | `256` | Reject very long SMILES input |
+| `RETROSYN_MAX_HEAVY_ATOMS` | `80` | Reject molecules too large for the public demo |
+| `RETROSYN_MIN_SECONDS_BETWEEN_RUNS` | `15` | Per-session cooldown between inference runs |
+| `RETROSYN_QUEUE_WAIT_SECONDS` | `5` | Time to wait for the single inference lock before returning busy |
+| `RETROSYN_LOCAL_TIME_BUDGET_SECONDS` | `30` | Local ReactionT5/MCTS search time budget |
+| `RETROSYN_LOCAL_MAX_SIMULATIONS` | `200` | Local ReactionT5/MCTS simulation cap |
+| `RETROSYN_HF_N_CANDIDATES` | `1` | GGUF candidate count cap |
+| `RETROSYN_LLAMA_QUERY_TIMEOUT_SECONDS` | `180` | llama-server HTTP request timeout |
+| `RETROSYN_PRELOAD_RL_MODEL` | `0` | Set to `1` to load the GGUF model on page view instead of first search |
 
 ### Run Inference from CLI
 
@@ -194,16 +218,19 @@ After training, deploy the LoRA adapter to HuggingFace Spaces:
 ```bash
 # 1. Download adapter weights from PI dashboard (.zip)
 
-# 2. Push adapter to HuggingFace Hub
-python scripts/merge_and_push.py --adapter_path models/lora_adapter --repo rhoahndur/retrosynthesis-qwen3-4b
+# 2. Set Hugging Face auth via environment variable or `huggingface-cli login`
+export HF_TOKEN="your-hf-token"
 
-# 3. Merge LoRA into base model on Google Colab (needs GPU, ~16GB)
-#    Run scripts/merge_colab.py in a Colab T4 notebook
+# 3. Push adapter to HuggingFace Hub
+python scripts/merge_and_push.py --adapter-path models/lora_adapter --repo-id rhoahndur/retrosynthesis-qwen3-4b
 
-# 4. Quantize to GGUF on Colab
-#    Run scripts/convert_gguf_colab.py — produces Q4_K_M (~2.5GB)
+# 4. Merge LoRA into base model on Google Colab (needs GPU, ~16GB)
+#    Add HF_TOKEN as a Colab secret, then run scripts/merge_colab.py
 
-# 5. HF Spaces auto-deploys via llama-server (CPU inference, no GPU needed)
+# 5. Quantize to GGUF on Colab
+#    Add HF_TOKEN as a Colab secret, then run scripts/convert_gguf_colab.py
+
+# 6. HF Spaces auto-deploys via llama-server (CPU inference, no GPU needed)
 ```
 
 Alternatively, deploy as a PI inference endpoint (requires PI credits):
@@ -257,7 +284,7 @@ GitHub Actions runs lint, fast tests, HuggingFace dataset verification, and eval
 - **MCTS** (`env/MCTS.py`) — Full Monte Carlo Tree Search with UCT selection, policy-guided expansion, reward-based simulation, backpropagation, and cycle detection. Finds multi-step routes to buyable starting materials.
 - **ChemEnv** (`env/ChemEnv.py`) — Gym-style wrapper combining policy, rewards, and stock list into a step-based interface for episodic RL.
 - **Verifiers Environment** (`environments/retrosynthesis/`) — Self-contained `vf.SingleTurnEnv` package for Prime Intellect hosted RL training. Loads USPTO-50K from HuggingFace Hub (`rhoahndur/retrosyn-targets`), falls back to 24 inline demo molecules. 6-component async RDKit reward rubric with ~204k bundled ASKCOS buyables, real Ertl-Schuffenhauer SA scoring, and bidirectional atom conservation.
-- **GGUF Inference** (`scripts/inference_hf.py`) — Downloads pre-built `llama-server` binary and GGUF model from HuggingFace Hub. Runs a persistent llama-server process that loads the model once into memory and serves requests via an OpenAI-compatible HTTP API on port 8090. No GPU, no compilation, no API key needed.
+- **GGUF Inference** (`scripts/inference_hf.py`) — Downloads the pinned `llama-server` b8508 Ubuntu x64 archive, verifies its SHA-256 digest before extraction, downloads the GGUF model from HuggingFace Hub, and runs a persistent OpenAI-compatible HTTP process on port 8090. No GPU, no compilation, no API key needed. The verified binary cache lives under `~/.cache/retrosyn-llama`.
 - **eval_topk** (`scripts/eval_topk.py`) — Top-K exact match evaluation against ground-truth reactions, stratified by SA score difficulty (easy/medium/hard) with reaction type breakdown and blind spot flagging.
 - **eval_mcts** (`scripts/eval_mcts.py`) — MCTS full-route success rate evaluation measuring how often complete synthesis routes (all leaves buyable) are found.
 
@@ -281,4 +308,6 @@ GitHub Actions runs lint, fast tests, HuggingFace dataset verification, and eval
 
 ## License
 
-This project was built at a hackathon and is provided as-is for educational and research purposes.
+Project source code is licensed under the MIT License; see `LICENSE`.
+Third-party models, datasets, and vendored chemistry utilities keep their own
+upstream terms; see `THIRD_PARTY_NOTICES.md`.
